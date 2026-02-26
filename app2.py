@@ -6,7 +6,7 @@ import re
 import numpy as np
 
 # ==========================================
-# ⚙️ 1. ตั้งค่าชื่อคอลัมน์ 
+# ⚙️ 1. ตั้งค่าชื่อคอลัมน์
 # ==========================================
 COL_MSG = 'ข้อความตอบกลับ'  
 COL_TIME = 'เวลาข้อความตอบกลับ'  
@@ -19,46 +19,24 @@ st.set_page_config(page_title="Helpdesk Executive Analytics", page_icon="📈", 
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
-    
-    html, body, [class*="css"], .stApp { 
-        font-family: 'Prompt', sans-serif !important; 
-        background-color: #F8FAFC !important;
-        color: #0F172A !important;
-    }
-    
+    html, body, [class*="css"], .stApp { font-family: 'Prompt', sans-serif !important; background-color: #F8FAFC !important; color: #0F172A !important; }
     p, label, h1, h2, h3, h4, h5, h6 { color: #0F172A !important; font-weight: 600 !important; }
-
     div.stPlotlyChart, div[data-testid="stDataFrame"] {
-        background-color: #ffffff !important;
-        border-radius: 12px;
-        padding: 24px 10px;
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05); 
-        border: 1px solid #E2E8F0 !important;
-        margin-bottom: 24px; 
+        background-color: #ffffff !important; border-radius: 12px; padding: 24px 10px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05); border: 1px solid #E2E8F0 !important; margin-bottom: 24px; 
     }
-
-    [data-testid="stSidebar"], [data-testid="stSidebar"] > div:first-child { 
-        background-color: #FFFFFF !important; 
-        border-right: 1px solid #E2E8F0 !important; 
-    }
-    
+    [data-testid="stSidebar"], [data-testid="stSidebar"] > div:first-child { background-color: #FFFFFF !important; border-right: 1px solid #E2E8F0 !important; }
     div[data-testid="stDateInput"] div, div[data-testid="stTextInput"] div, div[data-baseweb="select"] > div, input { 
         background-color: #F8FAFC !important; color: #0F172A !important; border-color: #CBD5E1 !important; border-radius: 6px !important; 
     }
-    
     [data-testid="stSidebar"] [data-testid="stButton"] button, div[data-testid="stButton"] button {
-        background-color: #FFFFFF !important; 
-        color: #0F172A !important; 
-        border: 1px solid #CBD5E1 !important; 
-        font-weight: 700 !important;
-        border-radius: 8px !important;
-        transition: all 0.3s !important;
+        background-color: #FFFFFF !important; color: #0F172A !important; border: 1px solid #CBD5E1 !important; 
+        font-weight: 700 !important; border-radius: 8px !important; transition: all 0.3s !important;
     }
-    [data-testid="stSidebar"] [data-testid="stButton"] button:hover { 
-        border-color: #EF4444 !important; 
-        color: #EF4444 !important; 
-        background-color: #FEF2F2 !important; 
-    }
+    [data-testid="stSidebar"] [data-testid="stButton"] button:hover { border-color: #EF4444 !important; color: #EF4444 !important; background-color: #FEF2F2 !important; }
+    
+    /* แต่งกล่อง Metric ให้ตัวใหญ่เตะตา */
+    div[data-testid="stMetricValue"] { font-size: 36px !important; font-weight: 800 !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,8 +75,10 @@ def create_kpi_card(title, value, accent_color, subtitle=""):
     """
     st.markdown(html, unsafe_allow_html=True)
 
-def section_title(text, icon=""):
-    st.markdown(f"<h3 style='color: #0F172A; font-weight: 700; margin-top: 35px; margin-bottom: 20px; border-bottom: 2px solid #E2E8F0; padding-bottom: 10px;'>{icon} {text}</h3>", unsafe_allow_html=True)
+def section_title(text, icon="", desc=""):
+    st.markdown(f"<h3 style='color: #0F172A; font-weight: 700; margin-top: 35px; margin-bottom: 5px; border-bottom: 2px solid #E2E8F0; padding-bottom: 8px;'>{icon} {text}</h3>", unsafe_allow_html=True)
+    if desc:
+        st.markdown(f"<p style='color: #64748B; font-size: 15px; margin-bottom: 20px; line-height: 1.5;'><i>{desc}</i></p>", unsafe_allow_html=True)
 
 def parse_sla_to_mins(sla_text):
     if pd.isna(sla_text): return 0
@@ -251,8 +231,20 @@ try:
 
     df_interactive = df_filtered.copy() 
 
+    # สไตล์กราฟพื้นฐาน (บังคับฟอนต์และสีให้ดูเป็นมืออาชีพ)
+    pro_layout = dict(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", 
+        font=dict(family="Prompt", color="#0F172A", size=14)
+    )
+    axis_style = dict(
+        tickfont=dict(size=13, weight='bold', color='#1E293B'), 
+        title_font=dict(size=14, weight='bold', color='#0F172A'), 
+        showgrid=True, gridcolor="#E2E8F0", automargin=True
+    )
+    axis_style_no_grid = dict(axis_style, showgrid=False)
+
     # ==========================================
-    # 7. Dashboard Layout (Data Storytelling Flow)
+    # 7. Dashboard Layout 
     # ==========================================
     st.markdown("<h1>📊 Helpdesk Executive Analytics</h1>", unsafe_allow_html=True)
     st.markdown("<p style='color: #64748B; margin-top: -15px; margin-bottom: 25px;'>ระบบวิเคราะห์ข้อมูลและติดตามผลการดำเนินงานแบบเรียลไทม์</p>", unsafe_allow_html=True)
@@ -266,14 +258,14 @@ try:
     top_tracked_dept = tracked_df['แผนก'].mode()[0] if not tracked_df.empty else "-"
 
     # ----------------------------------
-    # 1. SCORECARDS (The Summary)
+    # 1. SCORECARDS
     # ----------------------------------
     st.markdown("#### 📈 ภาพรวมเคสทั้งหมด (Overall Cases)")
     c1, c2, c3, c4 = st.columns(4)
     with c1: create_kpi_card("Total Cases", f"{total:,}", "#3B82F6", "เคสที่รับเข้ามาทั้งหมด")
     with c2: create_kpi_card("Completed", f"{closed:,}", "#10B981", "เคสที่ดำเนินการเสร็จสิ้น")
     with c3: create_kpi_card("In Progress", f"{open_cases:,}", "#F59E0B", "เคสที่ยังค้างอยู่ในระบบ")
-    with c4: create_kpi_card("SLA Breached", f"{len(df_interactive[df_interactive['sla_status_label'].isin(['❌ เกิน SLA (ปิดแล้ว)', '🔥 เกินกำหนด (รีบปิดด่วน!)'])]):,}", "#EF4444", "เคสที่เกินกำหนดเวลา")
+    with c4: create_kpi_card("SLA Breached", f"{len(df_interactive[df_interactive['sla_status_label'].isin(['❌ เกิน SLA (ปิดแล้ว)', '🔥 เกินกำหนด (รีบปิดด่วน!)'])]):,}", "#EF4444", "เคสที่ใช้เวลาเกินเกณฑ์ SLA")
 
     st.markdown("#### 🎯 ภาพรวมการติดตามงาน (Follow-up Tracking)")
     t1, t2, t3, t4 = st.columns(4)
@@ -282,15 +274,12 @@ try:
     with t3: create_kpi_card("แผนกที่โดนตามบ่อยสุด", f"{top_tracked_dept}", "#EC4899", "แผนกที่ต้องไปสะกิดบ่อยที่สุด")
     with t4: create_kpi_card("ค้างชำระ (ตามแล้วไม่เสร็จ)", f"{len(tracked_df[~tracked_df['สถานะ'].isin(['ปิด Case', 'เสร็จสิ้น'])]):,}", "#F43F5E", "ตามแล้วแต่ยังค้างอยู่")
 
-    # สไตล์กราฟกลาง
-    pro_layout = dict(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="Prompt", color="#0F172A", size=14))
-    axis_style = dict(tickfont=dict(size=13, weight='bold', color='#1E293B'), title_font=dict(size=14, weight='bold', color='#0F172A'), showgrid=True, gridcolor="#E2E8F0", automargin=True)
-    axis_style_no_grid = dict(axis_style, showgrid=False)
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # ----------------------------------
-    # 2. กราฟปริมาณเคสรายวัน (The Time) - ย้ายมาตรงนี้!
+    # 2. กราฟปริมาณเคสรายวัน
     # ----------------------------------
-    section_title("ปริมาณเคสรายวัน (Daily Volume Trend)", "📈")
+    section_title("ปริมาณเคสรายวัน (Daily Volume Trend)", "📈", "แสดงแนวโน้มปริมาณเคสที่รับเข้ามาในแต่ละวัน เพื่อประเมินภาระงานของทีม")
     trend_df = df_interactive.groupby('Received_Date').size().reset_index(name='Cases')
     if not trend_df.empty:
         fig_trend = go.Figure()
@@ -301,61 +290,143 @@ try:
             fill='tozeroy', fillcolor='rgba(59, 130, 246, 0.1)'
         ))
         fig_trend.update_traces(cliponaxis=False) 
-        fig_trend.update_layout(**pro_layout, height=450, xaxis=axis_style_no_grid, yaxis=axis_style, margin=dict(t=30, b=50, l=30, r=30))
-        fig_trend.update_yaxes(range=[0, trend_df['Cases'].max() * 1.3]) 
+        fig_trend.update_layout(**pro_layout, height=400, xaxis=axis_style_no_grid, yaxis=axis_style, margin=dict(t=30, b=30, l=30, r=30))
+        fig_trend.update_yaxes(range=[0, trend_df['Cases'].max() * 1.25]) 
         st.plotly_chart(fig_trend, use_container_width=True)
 
     # ----------------------------------
-    # 3. กราฟแท่งแผนก & กราฟโดนัท (The Area & Health)
+    # 3. พลังของการติดตามงาน (กู้ชีพเคสติดขัด)
+    # ----------------------------------
+    section_title("⚡ พลังของการติดตามงาน (Intervention Impact)", "🔥", "วิเคราะห์ประสิทธิภาพของ Helpdesk ในการผลักดันเคสที่ติดขัดให้สำเร็จ และความรวดเร็วที่แผนกยอมปิดเคสหลังจากโดนจี้งาน")
+    
+    tracked_all = df_interactive[df_interactive['Track_Status'] == 'ติดตาม'].copy()
+    tracked_closed = tracked_all[tracked_all['สถานะ'].isin(['ปิด Case', 'เสร็จสิ้น'])].copy()
+    
+    if not tracked_closed.empty and not tracked_all.empty:
+        tracked_closed['Hours_After_Track'] = (tracked_closed['Closed_DT'] - tracked_closed['First_Track_Time']).dt.total_seconds() / 3600
+        tracked_closed = tracked_closed[tracked_closed['Hours_After_Track'] >= 0]
+        
+        avg_hours_after = tracked_closed['Hours_After_Track'].mean() if not tracked_closed.empty else 0
+        success_rate = (len(tracked_closed) / len(tracked_all)) * 100
+        
+        col_eff1, col_eff2 = st.columns([1, 2])
+        with col_eff1:
+            st.markdown(f"""
+            <div style='background-color: #ECFDF5; border-left: 5px solid #10B981; padding: 15px; border-radius: 8px; margin-bottom: 15px;'>
+                <h4 style='color: #065F46; margin: 0;'>🎯 อัตรากู้ชีพสำเร็จ</h4>
+                <p style='color: #047857; font-size: 13px; margin: 5px 0 0 0;'>ผลักดันเคสที่ติดขัดจนปิดสำเร็จ</p>
+                <h2 style='color: #10B981; margin: 5px 0 0 0;'>{success_rate:.1f} %</h2>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown(f"""
+            <div style='background-color: #EFF6FF; border-left: 5px solid #3B82F6; padding: 15px; border-radius: 8px;'>
+                <h4 style='color: #1E3A8A; margin: 0;'>⏱️ ความเร็วหลังโดนจี้</h4>
+                <p style='color: #1D4ED8; font-size: 13px; margin: 5px 0 0 0;'>เวลาเฉลี่ยที่ปิดเคส (นับจากตอนทวงถาม)</p>
+                <h2 style='color: #3B82F6; margin: 5px 0 0 0;'>{avg_hours_after:.1f} ชม.</h2>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col_eff2:
+            dept_response = tracked_closed.groupby('แผนก')['Hours_After_Track'].mean().reset_index()
+            # จัดเรียงให้ค่าน้อยอยู่บน (ตอบสนองไวสุด)
+            dept_response = dept_response.sort_values('Hours_After_Track', ascending=False) 
+            
+            # 💥 แก้ไข: กำหนดความสูงกราฟแบบไดนามิก และตั้งค่า tickmode='linear' ห้ามซ่อนชื่อแผนก
+            dynamic_resp_h = max(300, len(dept_response) * 40)
+            
+            fig_resp = px.bar(
+                dept_response, x='Hours_After_Track', y='แผนก', orientation='h', 
+                text='Hours_After_Track', color_discrete_sequence=['#8B5CF6'],
+                title="ความตื่นตัว: แผนกไหนตอบสนองไวที่สุดหลังโดนจี้งาน? (ชั่วโมง)"
+            )
+            fig_resp.update_traces(
+                texttemplate='<b>%{x:.1f} ชม.</b>', textposition='outside', 
+                textfont=dict(size=14, color='#0F172A', weight='bold'), cliponaxis=False
+            )
+            # 💥 แก้ไข: บังคับโชว์ทุกชื่อแผนก ไม่ให้เหลื่อมกัน
+            fig_resp.update_layout(
+                **pro_layout, height=dynamic_resp_h, 
+                xaxis=dict(axis_style_no_grid, title="", range=[0, dept_response['Hours_After_Track'].max() * 1.3]), 
+                yaxis=dict(axis_style_no_grid, title="", tickmode='linear', dtick=1), # tickmode คือพระเอกแก้บัค
+                margin=dict(t=40, b=20, l=180, r=40)
+            )
+            st.plotly_chart(fig_resp, use_container_width=True)
+    else:
+        st.info("ยังไม่มีข้อมูลเคสที่ปิดแล้วเพื่อนำมาคำนวณเปรียบเทียบในหมวดนี้")
+
+    # ----------------------------------
+    # 4. กราฟแท่งแผนก (💥 จับแยกกางเต็มจอ และบังคับโชว์ทุกชื่อแผนก)
     # ----------------------------------
     st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
-    st.markdown("<h3 style='color: #0F172A; font-weight: 700; margin-bottom: 20px;'>🏢 วิเคราะห์ปริมาณงานรายแผนก และสัดส่วนสถานะ</h3>", unsafe_allow_html=True)
     
-    col_chart1, col_chart2 = st.columns([1, 1])
-    with col_chart1:
-        dept_df = df_filtered['แผนก'].value_counts().reset_index()
-        dept_df.columns = ['Department', 'Count']
-        dynamic_h = max(450, len(dept_df) * 35) 
-        fig_dept = px.bar(dept_df, x='Count', y='Department', orientation='h', text='Count', title="งานทั้งหมดรายแผนก")
-        fig_dept.update_traces(marker_color='#3B82F6', textposition='outside', textfont=dict(size=14, color='#0F172A', weight='bold'), cliponaxis=False)
-        fig_dept.update_layout(**pro_layout, height=dynamic_h, xaxis=dict(axis_style_no_grid, range=[0, dept_df['Count'].max() * 1.15]), yaxis=dict(axis_style_no_grid, categoryorder='total ascending'), margin=dict(t=50, b=30, l=150, r=30))
-        st.plotly_chart(fig_dept, use_container_width=True)
+    section_title("ปริมาณงานทั้งหมด แยกตามแผนก (Total Cases)", "🏢", "แสดงปริมาณเคสที่แต่ละแผนกได้รับมอบหมาย เพื่อดูการกระจายตัวของงาน")
+    dept_df = df_filtered['แผนก'].value_counts().reset_index()
+    dept_df.columns = ['Department', 'Count']
+    # 💥 แก้ไข: เพิ่มพื้นที่ความสูงให้พอดีกับจำนวนแผนก (แท่งละ 40px)
+    dynamic_h = max(400, len(dept_df) * 40) 
+    
+    fig_dept = px.bar(dept_df, x='Count', y='Department', orientation='h', text='Count')
+    fig_dept.update_traces(marker_color='#3B82F6', textposition='outside', textfont=dict(size=14, color='#0F172A', weight='bold'), cliponaxis=False)
+    # 💥 แก้ไข: ใส่ tickmode='linear' เพื่อบังคับให้แสดงชื่อแผนกครบทุกอัน ห้ามข้าม
+    fig_dept.update_layout(**pro_layout, height=dynamic_h, xaxis=dict(axis_style_no_grid, range=[0, dept_df['Count'].max() * 1.15], title="จำนวนเคส"), yaxis=dict(axis_style_no_grid, categoryorder='total ascending', title="", tickmode='linear', dtick=1), margin=dict(t=20, b=30, l=180, r=30))
+    st.plotly_chart(fig_dept, use_container_width=True)
 
-    with col_chart2:
-        tracked_dept_df = tracked_df['แผนก'].value_counts().reset_index()
-        tracked_dept_df.columns = ['Department', 'Count']
-        if not tracked_dept_df.empty:
-            dynamic_h2 = max(450, len(tracked_dept_df) * 35)
-            fig_track_dept = px.bar(tracked_dept_df, x='Count', y='Department', orientation='h', text='Count', title="เคสที่มีการติดตามรายแผนก")
-            fig_track_dept.update_traces(marker_color='#8B5CF6', textposition='outside', textfont=dict(size=14, color='#0F172A', weight='bold'), cliponaxis=False)
-            fig_track_dept.update_layout(**pro_layout, height=dynamic_h2, xaxis=dict(axis_style_no_grid, range=[0, tracked_dept_df['Count'].max() * 1.15]), yaxis=dict(axis_style_no_grid, categoryorder='total ascending'), margin=dict(t=50, b=30, l=150, r=30))
-            st.plotly_chart(fig_track_dept, use_container_width=True)
-        else:
-            st.info("ยังไม่มีข้อมูลการติดตามงานในแผนกใดๆ")
+    section_title("ปริมาณเคสที่มีการติดตาม แยกตามแผนก (Tracked Cases)", "🎯", "แสดงเฉพาะเคสที่เกิดความล่าช้าจนต้องถูกติดตามงาน เพื่อหาจุดที่เป็นคอขวด")
+    tracked_dept_df = tracked_df['แผนก'].value_counts().reset_index()
+    tracked_dept_df.columns = ['Department', 'Count']
+    if not tracked_dept_df.empty:
+        dynamic_h2 = max(400, len(tracked_dept_df) * 40)
+        fig_track_dept = px.bar(tracked_dept_df, x='Count', y='Department', orientation='h', text='Count')
+        fig_track_dept.update_traces(marker_color='#F43F5E', textposition='outside', textfont=dict(size=14, color='#0F172A', weight='bold'), cliponaxis=False) 
+        # 💥 แก้ไข: ใส่ tickmode='linear'
+        fig_track_dept.update_layout(**pro_layout, height=dynamic_h2, xaxis=dict(axis_style_no_grid, range=[0, tracked_dept_df['Count'].max() * 1.15], title="จำนวนครั้งที่ถูกติดตาม"), yaxis=dict(axis_style_no_grid, categoryorder='total ascending', title="", tickmode='linear', dtick=1), margin=dict(t=20, b=30, l=180, r=30))
+        st.plotly_chart(fig_track_dept, use_container_width=True)
+    else:
+        st.info("ยังไม่มีข้อมูลการติดตามงานในแผนกใดๆ")
 
+    # ----------------------------------
+    # 5. กราฟวงกลม (💥 แก้ไข: ถ่างขอบมหาศาลให้เส้นชี้และตัวหนังสือโชว์ครบ 100%)
+    # ----------------------------------
+    st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
     col_pie1, col_pie2 = st.columns(2)
+
     with col_pie1:
+        section_title("สัดส่วนสถานะงาน (Status)", "📌", "สัดส่วนของสถานะงานทั้งหมดในระบบ")
         status_df = df_interactive['สถานะ'].value_counts().reset_index()
         status_df.columns = ['Status', 'Count']
         status_color_map = {'ปิด Case': '#10B981', 'เสร็จสิ้น': '#10B981', 'รับเรื่องร้องขอ': '#F59E0B', 'กำลังดำเนินการ': '#3B82F6', 'ไม่ระบุ': '#94A3B8'}
-        fig_status = px.pie(status_df, names='Status', values='Count', hole=0.55, color='Status', color_discrete_map=status_color_map, title="สัดส่วนสถานะงาน (Status)")
-        fig_status.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=13, color='#0F172A', weight='bold'), marker=dict(line=dict(color='#FFFFFF', width=2)), domain=dict(x=[0.15, 0.85], y=[0.15, 0.85]))
-        fig_status.update_layout(**pro_layout, height=450, showlegend=False, margin=dict(t=50, b=50, l=80, r=80))
+        
+        fig_status = px.pie(status_df, names='Status', values='Count', hole=0.55, color='Status', color_discrete_map=status_color_map, title=None)
+        fig_status.update_traces(
+            textposition='outside', textinfo='percent+label', 
+            textfont=dict(size=14, color='#0F172A', weight='bold'), 
+            marker=dict(line=dict(color='#FFFFFF', width=2))
+        )
+        # 💥 แก้ไข: ให้ Margin ซ้าย-ขวา กว้างมากๆ (140px) และปิดโดนัทให้มีช่องว่าง
+        fig_status.update_layout(**pro_layout, height=450, showlegend=False, margin=dict(t=50, b=50, l=140, r=140))
         st.plotly_chart(fig_status, use_container_width=True)
 
     with col_pie2:
+        section_title("สัดส่วนสถานะ SLA", "⏱️", "สัดส่วนความสามารถในการปิดเคสตามกรอบเวลาที่กำหนด")
         sla_df = df_interactive['sla_status_label'].value_counts().reset_index()
         sla_df.columns = ['SLA_Status', 'Count']
         color_map = {'✅ ภายใน SLA': '#10B981', '🟢 ปกติ': '#34D399', '⚠️ ใกล้หลุด SLA (เร่งมือ)': '#F59E0B', '🔥 เกินกำหนด (รีบปิดด่วน!)': '#EF4444', '❌ เกิน SLA (ปิดแล้ว)': '#B91C1C'}
-        fig_sla = px.pie(sla_df, names='SLA_Status', values='Count', hole=0.55, color='SLA_Status', color_discrete_map=color_map, title="สัดส่วนสถานะ SLA")
-        fig_sla.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=13, color='#0F172A', weight='bold'), marker=dict(line=dict(color='#FFFFFF', width=2)), domain=dict(x=[0.15, 0.85], y=[0.15, 0.85]))
-        fig_sla.update_layout(**pro_layout, height=450, showlegend=False, margin=dict(t=50, b=50, l=80, r=80))
+        
+        fig_sla = px.pie(sla_df, names='SLA_Status', values='Count', hole=0.55, color='SLA_Status', color_discrete_map=color_map, title=None)
+        fig_sla.update_traces(
+            textposition='outside', textinfo='percent+label', 
+            textfont=dict(size=14, color='#0F172A', weight='bold'), 
+            marker=dict(line=dict(color='#FFFFFF', width=2))
+        )
+        # 💥 แก้ไข: ถ่าง Margin ซ้าย-ขวา ให้กว้างสุดๆ ป้องกันตัวหนังสือตกขอบ
+        fig_sla.update_layout(**pro_layout, height=450, showlegend=False, margin=dict(t=50, b=50, l=140, r=140))
         st.plotly_chart(fig_sla, use_container_width=True)
 
     # ----------------------------------
-    # 4. ตารางผลงานรายบุคคล (The People)
+    # 6. ตารางผลงานรายบุคคล 
     # ----------------------------------
-    section_title("ตารางวัดผลการติดตามงานรายบุคคล (Agent Performance)", "👩‍💻")
+    section_title("ตารางวัดผลการติดตามงานรายบุคคล (Agent Performance)", "👩‍💻", "ดูความขยันและปริมาณเคสที่เจ้าหน้าที่แต่ละท่านทำการติดตาม")
     if not tracked_df.empty:
         valid_agents_df = tracked_df[tracked_df['First_Agent_Name'] != 'ไม่มี']
         agent_stats = valid_agents_df.groupby('First_Agent_Name').agg(
@@ -372,7 +443,7 @@ try:
             agent_stats[['First_Agent_Name', 'เคสที่ติดตาม', '% ติดตามรวม', 'ปิดเคส', 'ยังไม่ปิด', '% เคสที่ยังไม่ปิด']],
             use_container_width=True, hide_index=True,
             column_config={
-                "First_Agent_Name": st.column_config.TextColumn("Role & Name"),
+                "First_Agent_Name": st.column_config.TextColumn("รายชื่อเจ้าหน้าที่"),
                 "เคสที่ติดตาม": st.column_config.NumberColumn("จำนวนเคสที่ติดตาม (ครั้ง)"),
                 "% ติดตามรวม": st.column_config.ProgressColumn("% เทียบกับทุกคน", format="%.2f%%", min_value=0, max_value=100),
                 "ปิดเคส": st.column_config.NumberColumn("ปิดเคสสำเร็จ"),
@@ -382,9 +453,9 @@ try:
         )
 
     # ----------------------------------
-    # 5. หมวดหมู่ที่โดนตาม (The Details)
+    # 7. หมวดหมู่ที่โดนตาม 
     # ----------------------------------
-    section_title("🔥 หมวดหมู่ปัญหาที่ถูกติดตามงานมากที่สุด (Top Tracked Categories)", "📑")
+    section_title("🔥 หมวดหมู่ปัญหาที่ถูกติดตามงานมากที่สุด (Top Tracked Categories)", "📑", "จัดอันดับหมวดหมู่ปัญหาที่เกิดความล่าช้าจนผู้ใช้งานต้องทวงถามบ่อยที่สุด")
     if not tracked_df.empty:
         cat_sub_df = tracked_df.groupby(['Category', 'Sub Category']).size().reset_index(name='จำนวนเคสที่ตาม')
         cat_sub_df = cat_sub_df.sort_values('จำนวนเคสที่ตาม', ascending=False)
@@ -401,9 +472,9 @@ try:
         st.info("ไม่มีข้อมูลการติดตามงานสำหรับหมวดหมู่นี้")
 
     # ----------------------------------
-    # 6. ตารางเคสรอติดตาม (The Action - ปิดท้ายสวยๆ)
+    # 8. ตารางเคสรอติดตาม 
     # ----------------------------------
-    section_title("🚨 เคสค้างที่รอการติดตามซ้ำ (Pending Follow-up)", "📞")
+    section_title("🚨 เคสค้างที่รอการติดตามซ้ำ (Pending Follow-up)", "📞", "รายการเคสที่ถูกติดตามไปแล้วแต่ปัจจุบันยังไม่ปิด (จัดเรียงจากเคสที่โดนทิ้งช่วงมานานที่สุด)")
     active_tracked_cases = tracked_df[~tracked_df['สถานะ'].isin(['ปิด Case', 'เสร็จสิ้น'])].copy()
 
     if not active_tracked_cases.empty:
