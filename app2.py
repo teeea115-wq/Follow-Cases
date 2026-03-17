@@ -18,7 +18,7 @@ st.set_page_config(page_title="Helpdesk Executive Analytics", page_icon="📈", 
 
 st.markdown("""
 <style>
-    @import url('https://docs.google.com/spreadsheets/d/19ntnoklfxKjvIpo4Dc_hcpFrsvdnbj9Ugp6CGTvsCiw/edit');
+    @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
     html, body, [class*="css"], .stApp { font-family: 'Prompt', sans-serif !important; background-color: #F8FAFC !important; color: #0F172A !important; }
     p, label, h1, h2, h3, h4, h5, h6 { color: #0F172A !important; font-weight: 600 !important; }
     div.stPlotlyChart, div[data-testid="stDataFrame"] {
@@ -145,7 +145,7 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
 # ==========================================
 # 5. โหลดข้อมูล
 # ==========================================
-SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRVUhShKYRay7zI0R4LcD9YBoe9VaZHIYvSRMWNXBAMDFws78ImtPqVPAfqKSvD_4lua8dgJm1OTaG/pub?output=csv"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/19ntnoklfxKjvIpo4Dc_hcpFrsvdnbj9Ugp6CGTvsCiw/edit?gid=107137690#gid=107137690"
 
 @st.cache_data(ttl=300)
 def load_and_prep_data(url):
