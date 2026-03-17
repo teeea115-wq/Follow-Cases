@@ -18,7 +18,7 @@ st.set_page_config(page_title="Helpdesk Executive Analytics", page_icon="📈", 
 
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
+    @import url('https://docs.google.com/spreadsheets/d/19ntnoklfxKjvIpo4Dc_hcpFrsvdnbj9Ugp6CGTvsCiw/edit');
     html, body, [class*="css"], .stApp { font-family: 'Prompt', sans-serif !important; background-color: #F8FAFC !important; color: #0F172A !important; }
     p, label, h1, h2, h3, h4, h5, h6 { color: #0F172A !important; font-weight: 600 !important; }
     div.stPlotlyChart, div[data-testid="stDataFrame"] {
