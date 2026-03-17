@@ -120,7 +120,7 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
 # ==========================================
 # 5. โหลดข้อมูล
 # ==========================================
-SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSgPRb97RGvfCerYBUEctV2nSQNA2FhddBpdnpMuq55ol1tcY8x1WaGU1UK_rMOAKU1cfEJEAD_U6ag/pub?gid=107137690&single=true&output=csv"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRVUhShKYRay7zI0R4LcD9YBoe9VaZHIYvSRMWNXBAMDFws78ImtPqVPAfqKSvD_4lua8dgJm1OTaG/pub?output=csv"
 
 @st.cache_data(ttl=300)
 def load_and_prep_data(url):
@@ -334,27 +334,18 @@ try:
         st.dataframe(cat_sub_df, use_container_width=True, height=350, hide_index=True, column_config={"จำนวนเคสที่ตาม": st.column_config.ProgressColumn("จำนวนเคสที่ถูกติดตาม (ครั้ง)", format="%d", min_value=0, max_value=int(cat_sub_df['จำนวนเคสที่ตาม'].max()) if not cat_sub_df.empty else 100)})
     else: st.info("ไม่มีข้อมูลการติดตามงานสำหรับหมวดหมู่นี้")
 
-    # 💥 แก้ไขตารางหมวดนี้ใหม่ทั้งหมด ดึงเฉพาะเคสที่ยังไม่มีคนตาม และโชว์ SLA ชัดๆ
     section_title("🚨 เคสค้างที่ยังไม่มีการติดตาม (Pending First Follow-up)", "📞", "รายการเคสค้างที่ **ยังไม่เคยมีเจ้าหน้าที่ Helpdesk เข้าไปติดตามงานเลยแม้แต่ครั้งเดียว** (เรียงจากเคสที่รอนานที่สุด พร้อมเทียบเกณฑ์ SLA)")
-    
-    # กรองเฉพาะเคสที่ยังไม่ปิด และ ยังไม่เคยติดตาม
     untracked_open_cases = df_interactive[(~df_interactive['status'].isin(['ปิด Case', 'เสร็จสิ้น'])) & (df_interactive['Track_Status'] == 'ไม่ติดตาม')].copy()
-    
     if not untracked_open_cases.empty:
-        # คำนวณเวลาที่รอ และ SLA (เป็นชั่วโมง) เพื่อแสดงในตารางให้ดูง่าย
         untracked_open_cases['รอมาแล้ว (ชม.)'] = (untracked_open_cases['actual_minutes_spent'] / 60).round(1)
         untracked_open_cases['SLA (ชม.)'] = (untracked_open_cases['sla_limit_minutes'] / 60).round(1)
-        
-        # จัดเรียงจากรอนานสุด ขึ้นมาบนสุด
         untracked_open_cases = untracked_open_cases.sort_values(by='รอมาแล้ว (ชม.)', ascending=False)
-        
         display_untracked = untracked_open_cases[['Case_Id', 'department', 'status', 'Received_DT', 'รอมาแล้ว (ชม.)', 'SLA (ชม.)', 'sla_status_label']]
         display_untracked.columns = ['หมายเลข Case', 'แผนก', 'สถานะปัจจุบัน', 'เวลารับเรื่อง', 'รอมาแล้ว (ชม.)', 'SLA ที่กำหนด (ชม.)', 'สถานะ SLA']
-
         st.dataframe(
             display_untracked, use_container_width=True, height=350, hide_index=True, 
             column_config={
-                "รอมาแล้ว (ชม.)": st.column_config.ProgressColumn("รอมาแล้ว (ชม.)", format="%.1f ชม.", min_value=0, max_value=max(72, float(untracked_open_cases['รอมาแล้ว (ชม.)'].max()))),
+                "รอมาแล้ว (ชม.)": st.column_config.NumberColumn("รอมาแล้ว (ชม.)", format="%.1f ชม."),
                 "เวลารับเรื่อง": st.column_config.DatetimeColumn("เวลารับเรื่อง", format="DD/MM/YYYY HH:mm"),
                 "SLA ที่กำหนด (ชม.)": st.column_config.NumberColumn("SLA ที่กำหนด (ชม.)", format="%.1f ชม.")
             }
@@ -379,11 +370,21 @@ try:
         urgent_df = open_cases_df[(open_cases_df['sla_limit_minutes'] > 0) & (open_cases_df['actual_minutes_spent'] >= (open_cases_df['sla_limit_minutes'] * 0.75))].copy()
         urgent_untracked_df = urgent_df[urgent_df['Track_Status'] == 'ไม่ติดตาม'].copy()
         if not urgent_untracked_df.empty:
-            urgent_untracked_df['SLA_Used_Percent'] = (urgent_untracked_df['actual_minutes_spent'] / urgent_untracked_df['sla_limit_minutes']) * 100
-            urgent_untracked_df = urgent_untracked_df.sort_values('SLA_Used_Percent', ascending=False)
-            display_urgent = urgent_untracked_df[['Case_Id', 'department', 'Category', 'Received_DT', 'SLA_Used_Percent']]
-            display_urgent.columns = ['หมายเลข Case', 'แผนก', 'หมวดหมู่', 'เวลารับเรื่อง', '% SLA ที่ใช้ไป']
-            st.dataframe(display_urgent, use_container_width=True, height=350, hide_index=True, column_config={"เวลารับเรื่อง": st.column_config.DatetimeColumn("เวลารับเรื่อง", format="DD/MM/YYYY HH:mm"), "% SLA ที่ใช้ไป": st.column_config.ProgressColumn("% SLA ที่ใช้ไป", format="%.1f%%", min_value=75, max_value=max(100, float(urgent_untracked_df['SLA_Used_Percent'].max())))})
+            urgent_untracked_df['SLA_Hours'] = (urgent_untracked_df['sla_limit_minutes'] / 60).round(1)
+            urgent_untracked_df['Spent_Hours'] = (urgent_untracked_df['actual_minutes_spent'] / 60).round(1)
+            urgent_untracked_df = urgent_untracked_df.sort_values('Spent_Hours', ascending=False)
+            
+            display_urgent = urgent_untracked_df[['Case_Id', 'department', 'Category', 'Received_DT', 'SLA_Hours', 'Spent_Hours']]
+            display_urgent.columns = ['หมายเลข Case', 'แผนก', 'หมวดหมู่', 'เวลารับเรื่อง', 'SLA ที่กำหนด (ชม.)', 'เวลาที่ใช้ไป (ชม.)']
+            
+            st.dataframe(
+                display_urgent, use_container_width=True, height=350, hide_index=True, 
+                column_config={
+                    "เวลารับเรื่อง": st.column_config.DatetimeColumn("เวลารับเรื่อง", format="DD/MM/YYYY HH:mm"), 
+                    "SLA ที่กำหนด (ชม.)": st.column_config.NumberColumn("SLA (ชม.)", format="%.1f ชม."),
+                    "เวลาที่ใช้ไป (ชม.)": st.column_config.NumberColumn("ใช้เวลาไปแล้ว (ชม.)", format="%.1f ชม.")
+                }
+            )
         else: st.success("🎉 ยอดเยี่ยม! ไม่มีเคสวิกฤตที่ตกหล่นการติดตามเลยในขณะนี้")
     else: st.success("🎉 ไม่มีเคสค้างในระบบเลย!")
         
