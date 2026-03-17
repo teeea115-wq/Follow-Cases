@@ -6,10 +6,10 @@ import re
 import numpy as np
 
 # ==========================================
-# ⚙️ 1. ตั้งค่าชื่อคอลัมน์
+# ⚙️ 1. ตั้งค่าชื่อคอลัมน์ (อัปเดตตามไฟล์ใหม่)
 # ==========================================
-COL_MSG = 'ข้อความตอบกลับ'  
-COL_TIME = 'เวลาข้อความตอบกลับ'  
+COL_MSG = 'response_message'  
+COL_TIME = 'response_time_v'  
 
 # ==========================================
 # 2. ตั้งค่าหน้าเว็บและ CSS
@@ -109,26 +109,26 @@ def get_sla_status_label(row):
 def extract_tracking_info(row, col_msg_actual, col_time_actual):
     msg_str = str(row.get(col_msg_actual, ''))
     time_str = str(row.get(col_time_actual, ''))
-    
+
     if msg_str == 'nan' or msg_str == '':
         return pd.Series({'Track_Status': 'ไม่ติดตาม', 'Track_Count': 0, 'First_Agent': 'ไม่มี', 'First_Track_Time': pd.NaT, 'Last_Track_Time': pd.NaT})
 
     msgs = msg_str.split(',')
     times = time_str.split(',')
-    
+
     track_times = []
     first_agent = 'ไม่มี'
-    
+
     for i in range(min(len(msgs), len(times))):
         msg = msgs[i].strip()
         t_val = times[i].strip()
-        
+
         if "เบื้องต้นทางเจ้าหน้าที่ทำการติดตาม" in msg or re.search(r"(?i)help\s*desk\s*[0-9]+.*ติดตาม", msg):
             agent_match = re.search(r"(?i)help\s*desk\s*([0-9]+)", msg)
             if agent_match:
                 agent_name = f"Help Desk {agent_match.group(1)}"
                 if first_agent == 'ไม่มี': first_agent = agent_name
-            
+
             try:
                 t_obj = pd.to_datetime(t_val, format='%d/%m/%Y %H:%M', errors='coerce')
                 if pd.notna(t_obj): track_times.append(t_obj)
@@ -145,18 +145,30 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
 # ==========================================
 # 5. โหลดข้อมูล
 # ==========================================
-SHEET_URL = "https://docs.google.com/spreadsheets/d/19ntnoklfxKjvIpo4Dc_hcpFrsvdnbj9Ugp6CGTvsCiw/edit?gid=107137690#gid=107137690"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRVUhShKYRay7zI0R4LcD9YBoe9VaZHIYvSRMWNXBAMDFws78ImtPqVPAfqKSvD_4lua8dgJm1OTaG/pub?output=csv"
 
 @st.cache_data(ttl=300)
 def load_and_prep_data(url):
     df = pd.read_csv(url)
     df.columns = df.columns.str.strip() 
-    
+
+    # 🛠️ แปลงชื่อคอลัมน์ใหม่ ให้กลายเป็นชื่อเก่าที่โค้ดรู้จัก (จะได้ไม่ต้องแก้โค้ดกราฟ)
+    rename_mapping = {
+        'Case_Id': 'หมายเลข Case',
+        'department': 'แผนก',
+        'status': 'สถานะ',
+        'Sub_Category': 'Sub Category',
+        'datetime_received': 'วัน / เวลา (รับเรื่องร้องขอ)',
+        'datetime_closed': 'วัน / เวลา (ปิดเคส)'
+    }
+    df = df.rename(columns=rename_mapping)
+
+    # 🛠️ ปล่อยให้ Pandas อ่านวันที่เอง ไม่บังคับ format ป้องกัน Error
     if 'วัน / เวลา (รับเรื่องร้องขอ)' in df.columns:
-        df['Received_DT'] = pd.to_datetime(df['วัน / เวลา (รับเรื่องร้องขอ)'], format='%d/%m/%y %H:%M:%S', errors='coerce')
+        df['Received_DT'] = pd.to_datetime(df['วัน / เวลา (รับเรื่องร้องขอ)'], errors='coerce')
         df['Received_Date'] = df['Received_DT'].dt.date
     if 'วัน / เวลา (ปิดเคส)' in df.columns:
-        df['Closed_DT'] = pd.to_datetime(df['วัน / เวลา (ปิดเคส)'], format='%d/%m/%y %H:%M:%S', errors='coerce')
+        df['Closed_DT'] = pd.to_datetime(df['วัน / เวลา (ปิดเคส)'], errors='coerce')
 
     df['แผนก'] = df.get('แผนก', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
     df['สถานะ'] = df.get('สถานะ', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
@@ -169,7 +181,7 @@ def load_and_prep_data(url):
         df['actual_minutes_spent'] = df.apply(lambda row: calculate_actual_mins(row, now), axis=1)
         df['sla_status_label'] = df.apply(get_sla_status_label, axis=1)
     else: df['sla_status_label'] = 'ไม่พบข้อมูล SLA'
-        
+
     actual_msg_col = next((col for col in df.columns if COL_MSG in col), None)
     actual_time_col = next((col for col in df.columns if COL_TIME in col), None)
 
@@ -190,12 +202,12 @@ def load_and_prep_data(url):
         'Help Desk 6': 'Help Desk 6 (กิติลักษณ์)'
     }
     df['First_Agent_Name'] = df.get('First_Agent', pd.Series(['ไม่มี']*len(df))).map(agent_mapping).fillna(df.get('First_Agent', 'ไม่มี'))
-    
+
     return df, actual_msg_col, actual_time_col
 
 try:
     df, found_msg, found_time = load_and_prep_data(SHEET_URL)
-    
+
     if not found_msg or not found_time:
         st.warning(f"⚠️ **ระบบหาคอลัมน์ไม่เจอ!** กรุณาเช็คในไฟล์ Sheets ว่ามีคอลัมน์ชื่อ `{COL_MSG}` และ `{COL_TIME}` เป๊ะๆ หรือไม่")
 
@@ -205,13 +217,13 @@ try:
     if st.sidebar.button("🚪 ล็อกเอาท์ (Logout)", use_container_width=True):
         st.session_state["authenticated"] = False
         st.rerun()
-        
+
     st.sidebar.markdown("<h2 style='margin-top: 15px;'>🎯 ตัวกรองข้อมูล</h2>", unsafe_allow_html=True)
     st.sidebar.markdown("<hr style='margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
-    
+
     if df['Received_Date'].dropna().empty: min_date = max_date = pd.Timestamp.now().date()
     else: min_date, max_date = df['Received_Date'].min(), df['Received_Date'].max()
-        
+
     date_range = st.sidebar.date_input("📅 ช่วงเวลา", value=(min_date, max_date), min_value=min_date, max_value=max_date)
     start_date = date_range[0] if len(date_range) > 0 else min_date
     end_date = date_range[1] if len(date_range) > 1 else start_date
@@ -298,17 +310,17 @@ try:
     # 3. พลังของการติดตามงาน (กู้ชีพเคสติดขัด)
     # ----------------------------------
     section_title("⚡ พลังของการติดตามงาน (Intervention Impact)", "🔥", "วิเคราะห์ประสิทธิภาพของ Helpdesk ในการผลักดันเคสที่ติดขัดให้สำเร็จ และความรวดเร็วที่แผนกยอมปิดเคสหลังจากโดนจี้งาน")
-    
+
     tracked_all = df_interactive[df_interactive['Track_Status'] == 'ติดตาม'].copy()
     tracked_closed = tracked_all[tracked_all['สถานะ'].isin(['ปิด Case', 'เสร็จสิ้น'])].copy()
-    
+
     if not tracked_closed.empty and not tracked_all.empty:
         tracked_closed['Hours_After_Track'] = (tracked_closed['Closed_DT'] - tracked_closed['First_Track_Time']).dt.total_seconds() / 3600
         tracked_closed = tracked_closed[tracked_closed['Hours_After_Track'] >= 0]
-        
+
         avg_hours_after = tracked_closed['Hours_After_Track'].mean() if not tracked_closed.empty else 0
         success_rate = (len(tracked_closed) / len(tracked_all)) * 100
-        
+
         col_eff1, col_eff2 = st.columns([1, 2])
         with col_eff1:
             st.markdown(f"""
@@ -318,7 +330,7 @@ try:
                 <h2 style='color: #10B981; margin: 5px 0 0 0;'>{success_rate:.1f} %</h2>
             </div>
             """, unsafe_allow_html=True)
-            
+
             st.markdown(f"""
             <div style='background-color: #EFF6FF; border-left: 5px solid #3B82F6; padding: 15px; border-radius: 8px;'>
                 <h4 style='color: #1E3A8A; margin: 0;'>⏱️ ความเร็วหลังโดนจี้</h4>
@@ -326,15 +338,15 @@ try:
                 <h2 style='color: #3B82F6; margin: 5px 0 0 0;'>{avg_hours_after:.1f} ชม.</h2>
             </div>
             """, unsafe_allow_html=True)
-            
+
         with col_eff2:
             dept_response = tracked_closed.groupby('แผนก')['Hours_After_Track'].mean().reset_index()
             # จัดเรียงให้ค่าน้อยอยู่บน (ตอบสนองไวสุด)
             dept_response = dept_response.sort_values('Hours_After_Track', ascending=False) 
-            
+
             # 💥 แก้ไข: กำหนดความสูงกราฟแบบไดนามิก และตั้งค่า tickmode='linear' ห้ามซ่อนชื่อแผนก
             dynamic_resp_h = max(300, len(dept_response) * 40)
-            
+
             fig_resp = px.bar(
                 dept_response, x='Hours_After_Track', y='แผนก', orientation='h', 
                 text='Hours_After_Track', color_discrete_sequence=['#8B5CF6'],
@@ -359,13 +371,13 @@ try:
     # 4. กราฟแท่งแผนก (💥 จับแยกกางเต็มจอ และบังคับโชว์ทุกชื่อแผนก)
     # ----------------------------------
     st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
-    
+
     section_title("ปริมาณงานทั้งหมด แยกตามแผนก (Total Cases)", "🏢", "แสดงปริมาณเคสที่แต่ละแผนกได้รับมอบหมาย เพื่อดูการกระจายตัวของงาน")
     dept_df = df_filtered['แผนก'].value_counts().reset_index()
     dept_df.columns = ['Department', 'Count']
     # 💥 แก้ไข: เพิ่มพื้นที่ความสูงให้พอดีกับจำนวนแผนก (แท่งละ 40px)
     dynamic_h = max(400, len(dept_df) * 40) 
-    
+
     fig_dept = px.bar(dept_df, x='Count', y='Department', orientation='h', text='Count')
     fig_dept.update_traces(marker_color='#3B82F6', textposition='outside', textfont=dict(size=14, color='#0F172A', weight='bold'), cliponaxis=False)
     # 💥 แก้ไข: ใส่ tickmode='linear' เพื่อบังคับให้แสดงชื่อแผนกครบทุกอัน ห้ามข้าม
@@ -396,7 +408,7 @@ try:
         status_df = df_interactive['สถานะ'].value_counts().reset_index()
         status_df.columns = ['Status', 'Count']
         status_color_map = {'ปิด Case': '#10B981', 'เสร็จสิ้น': '#10B981', 'รับเรื่องร้องขอ': '#F59E0B', 'กำลังดำเนินการ': '#3B82F6', 'ไม่ระบุ': '#94A3B8'}
-        
+
         fig_status = px.pie(status_df, names='Status', values='Count', hole=0.55, color='Status', color_discrete_map=status_color_map, title=None)
         fig_status.update_traces(
             textposition='outside', textinfo='percent+label', 
@@ -412,7 +424,7 @@ try:
         sla_df = df_interactive['sla_status_label'].value_counts().reset_index()
         sla_df.columns = ['SLA_Status', 'Count']
         color_map = {'✅ ภายใน SLA': '#10B981', '🟢 ปกติ': '#34D399', '⚠️ ใกล้หลุด SLA (เร่งมือ)': '#F59E0B', '🔥 เกินกำหนด (รีบปิดด่วน!)': '#EF4444', '❌ เกิน SLA (ปิดแล้ว)': '#B91C1C'}
-        
+
         fig_sla = px.pie(sla_df, names='SLA_Status', values='Count', hole=0.55, color='SLA_Status', color_discrete_map=color_map, title=None)
         fig_sla.update_traces(
             textposition='outside', textinfo='percent+label', 
@@ -434,11 +446,11 @@ try:
             ปิดเคส=('สถานะ', lambda x: x.isin(['ปิด Case', 'เสร็จสิ้น']).sum()),
             ยังไม่ปิด=('สถานะ', lambda x: (~x.isin(['ปิด Case', 'เสร็จสิ้น'])).sum())
         ).reset_index()
-        
+
         agent_stats['% ติดตามรวม'] = (agent_stats['เคสที่ติดตาม'] / total_tracked) * 100
         agent_stats['% เคสที่ยังไม่ปิด'] = (agent_stats['ยังไม่ปิด'] / agent_stats['เคสที่ติดตาม']) * 100
         agent_stats = agent_stats.sort_values(by='เคสที่ติดตาม', ascending=False)
-        
+
         st.dataframe(
             agent_stats[['First_Agent_Name', 'เคสที่ติดตาม', '% ติดตามรวม', 'ปิดเคส', 'ยังไม่ปิด', '% เคสที่ยังไม่ปิด']],
             use_container_width=True, hide_index=True,
@@ -460,7 +472,7 @@ try:
         cat_sub_df = tracked_df.groupby(['Category', 'Sub Category']).size().reset_index(name='จำนวนเคสที่ตาม')
         cat_sub_df = cat_sub_df.sort_values('จำนวนเคสที่ตาม', ascending=False)
         max_val = int(cat_sub_df['จำนวนเคสที่ตาม'].max()) if not cat_sub_df.empty else 100
-        
+
         st.dataframe(
             cat_sub_df, 
             use_container_width=True, height=350, hide_index=True,
@@ -482,10 +494,10 @@ try:
         active_tracked_cases['ชั่วโมงที่เงียบหาย'] = (now_ts - active_tracked_cases['Last_Track_Time']).dt.total_seconds() / 3600
         active_tracked_cases['ชั่วโมงที่เงียบหาย'] = active_tracked_cases['ชั่วโมงที่เงียบหาย'].round(1)
         active_tracked_cases = active_tracked_cases.sort_values(by='ชั่วโมงที่เงียบหาย', ascending=False)
-        
+
         display_followup = active_tracked_cases[['หมายเลข Case', 'First_Agent_Name', 'แผนก', 'สถานะ', 'Track_Count', 'Last_Track_Time', 'ชั่วโมงที่เงียบหาย']]
         display_followup.columns = ['หมายเลข Case', 'คนตามเคสคนแรก', 'แผนก', 'สถานะปัจจุบัน', 'ติดตามมาแล้ว (ครั้ง)', 'อัปเดตล่าสุด', 'เงียบหายไป (ชั่วโมง)']
-        
+
         st.dataframe(
             display_followup, use_container_width=True, height=350, hide_index=True,
             column_config={
@@ -569,7 +581,8 @@ try:
             st.success("🎉 ยอดเยี่ยม! ไม่มีเคสวิกฤตที่ตกหล่นการติดตามเลยในขณะนี้")
     else:
         st.success("🎉 ไม่มีเคสค้างในระบบเลย!")
-        # ==========================================
+        
+    # ==========================================
     # 🚀 12. กำแพงแห่งความรับผิดชอบ (SLA Breach Matrix)
     # ==========================================
     st.markdown("<hr style='margin-top: 40px; margin-bottom: 20px;'>", unsafe_allow_html=True)
@@ -664,4 +677,4 @@ try:
 # ส่วนจัดการ Error (ต้องอยู่ท้ายสุดและย่อหน้าติดขอบซ้ายสุด)
 # ==========================================
 except Exception as e:
-    st.error(f"เกิดข้อผิดพลาดในการรันระบบ: {e}") 
+    st.error(f"เกิดข้อผิดพลาดในการรันระบบ: {e}")
