@@ -6,10 +6,10 @@ import re
 import numpy as np
 
 # ==========================================
-# ⚙️ 1. ตั้งค่าชื่อคอลัมน์ (อัปเดตตามไฟล์ใหม่)
+# ⚙️ 1. ตั้งค่าชื่อคอลัมน์
 # ==========================================
-COL_MSG = 'response_message'  
-COL_TIME = 'response_time_v'  
+COL_MSG = 'ข้อความตอบกลับ'  
+COL_TIME = 'เวลาข้อความตอบกลับ'  
 
 # ==========================================
 # 2. ตั้งค่าหน้าเว็บและ CSS
@@ -152,23 +152,11 @@ def load_and_prep_data(url):
     df = pd.read_csv(url)
     df.columns = df.columns.str.strip() 
 
-    # 🛠️ แปลงชื่อคอลัมน์ใหม่ ให้กลายเป็นชื่อเก่าที่โค้ดรู้จัก (จะได้ไม่ต้องแก้โค้ดกราฟ)
-    rename_mapping = {
-        'Case_Id': 'หมายเลข Case',
-        'department': 'แผนก',
-        'status': 'สถานะ',
-        'Sub_Category': 'Sub Category',
-        'datetime_received': 'วัน / เวลา (รับเรื่องร้องขอ)',
-        'datetime_closed': 'วัน / เวลา (ปิดเคส)'
-    }
-    df = df.rename(columns=rename_mapping)
-
-    # 🛠️ ปล่อยให้ Pandas อ่านวันที่เอง ไม่บังคับ format ป้องกัน Error
     if 'วัน / เวลา (รับเรื่องร้องขอ)' in df.columns:
-        df['Received_DT'] = pd.to_datetime(df['วัน / เวลา (รับเรื่องร้องขอ)'], errors='coerce')
+        df['Received_DT'] = pd.to_datetime(df['วัน / เวลา (รับเรื่องร้องขอ)'], format='%d/%m/%y %H:%M:%S', errors='coerce')
         df['Received_Date'] = df['Received_DT'].dt.date
     if 'วัน / เวลา (ปิดเคส)' in df.columns:
-        df['Closed_DT'] = pd.to_datetime(df['วัน / เวลา (ปิดเคส)'], errors='coerce')
+        df['Closed_DT'] = pd.to_datetime(df['วัน / เวลา (ปิดเคส)'], format='%d/%m/%y %H:%M:%S', errors='coerce')
 
     df['แผนก'] = df.get('แผนก', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
     df['สถานะ'] = df.get('สถานะ', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
@@ -581,8 +569,7 @@ try:
             st.success("🎉 ยอดเยี่ยม! ไม่มีเคสวิกฤตที่ตกหล่นการติดตามเลยในขณะนี้")
     else:
         st.success("🎉 ไม่มีเคสค้างในระบบเลย!")
-        
-    # ==========================================
+        # ==========================================
     # 🚀 12. กำแพงแห่งความรับผิดชอบ (SLA Breach Matrix)
     # ==========================================
     st.markdown("<hr style='margin-top: 40px; margin-bottom: 20px;'>", unsafe_allow_html=True)
@@ -677,4 +664,4 @@ try:
 # ส่วนจัดการ Error (ต้องอยู่ท้ายสุดและย่อหน้าติดขอบซ้ายสุด)
 # ==========================================
 except Exception as e:
-    st.error(f"เกิดข้อผิดพลาดในการรันระบบ: {e}")
+    st.error(f"เกิดข้อผิดพลาดในการรันระบบ: {e}") 
