@@ -98,37 +98,24 @@ def get_sla_status_label(row):
 def extract_tracking_info(row, col_msg_actual, col_time_actual):
     msg_str = str(row.get(col_msg_actual, ''))
     time_str = str(row.get(col_time_actual, ''))
-
-    if msg_str == 'nan' or msg_str == '':
-        return pd.Series({'Track_Status': 'ไม่ติดตาม', 'Track_Count': 0, 'First_Agent': 'ไม่มี', 'First_Track_Time': pd.NaT, 'Last_Track_Time': pd.NaT})
-
+    if msg_str == 'nan' or msg_str == '': return pd.Series({'Track_Status': 'ไม่ติดตาม', 'Track_Count': 0, 'First_Agent': 'ไม่มี', 'First_Track_Time': pd.NaT, 'Last_Track_Time': pd.NaT})
     msgs = msg_str.split(',')
     times = time_str.split(',')
     track_times = []
     first_agent = 'ไม่มี'
-
     for i in range(min(len(msgs), len(times))):
         msg = msgs[i].strip()
         t_val = times[i].strip()
-
         if "เบื้องต้นทางเจ้าหน้าที่ทำการติดตาม" in msg or re.search(r"(?i)help\s*desk\s*[0-9]+.*ติดตาม", msg):
             agent_match = re.search(r"(?i)help\s*desk\s*([0-9]+)", msg)
             if agent_match:
                 agent_name = f"Help Desk {agent_match.group(1)}"
                 if first_agent == 'ไม่มี': first_agent = agent_name
-
             try:
                 t_obj = pd.to_datetime(t_val, format='%d/%m/%Y %H:%M', errors='coerce')
                 if pd.notna(t_obj): track_times.append(t_obj)
             except: pass
-
-    return pd.Series({
-        'Track_Status': 'ติดตาม' if track_times else 'ไม่ติดตาม',
-        'Track_Count': len(track_times), 
-        'First_Agent': first_agent,
-        'First_Track_Time': min(track_times) if track_times else pd.NaT, 
-        'Last_Track_Time': max(track_times) if track_times else pd.NaT
-    })
+    return pd.Series({'Track_Status': 'ติดตาม' if track_times else 'ไม่ติดตาม', 'Track_Count': len(track_times), 'First_Agent': first_agent, 'First_Track_Time': min(track_times) if track_times else pd.NaT, 'Last_Track_Time': max(track_times) if track_times else pd.NaT})
 
 # ==========================================
 # 5. โหลดข้อมูล
@@ -139,15 +126,12 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSgPRb97RGvfCerYBUE
 def load_and_prep_data(url):
     df = pd.read_csv(url)
     df.columns = df.columns.str.strip() 
-
-    # สร้างคอลัมน์รอไว้ล่วงหน้าเพื่อกัน Error
     df['Received_DT'] = pd.NaT
     df['Received_Date'] = pd.NaT
     df['Closed_DT'] = pd.NaT
 
     recv_col = next((c for c in df.columns if str(c).lower() == 'datetime_received'), None)
     if recv_col:
-        # บังคับ dayfirst=True แก้วันที่สลับเป็นเดือน
         df['Received_DT'] = pd.to_datetime(df[recv_col], dayfirst=True, errors='coerce')
         df['Received_Date'] = df['Received_DT'].dt.date
         
@@ -257,7 +241,7 @@ try:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    section_title("ปริมาณเคสรายวัน (Daily Volume Trend)", "📈", "แสดงแนวโน้มปริมาณเคสที่รับเข้ามาในแต่ละวัน")
+    section_title("ปริมาณเคสรายวัน (Daily Volume Trend)", "📈", "แสดงแนวโน้มปริมาณเคสที่รับเข้ามาในแต่ละวัน เพื่อประเมินภาระงานของทีม Helpdesk")
     trend_df = df_interactive.groupby('Received_Date').size().reset_index(name='Cases')
     if not trend_df.empty:
         fig_trend = go.Figure()
@@ -267,7 +251,7 @@ try:
         fig_trend.update_yaxes(range=[0, trend_df['Cases'].max() * 1.25]) 
         st.plotly_chart(fig_trend, use_container_width=True)
 
-    section_title("⚡ พลังของการติดตามงาน (Intervention Impact)", "🔥", "ความรวดเร็วที่แผนกยอมปิดเคสหลังจากโดนจี้งาน")
+    section_title("⚡ พลังของการติดตามงาน (Intervention Impact)", "🔥", "วิเคราะห์ประสิทธิภาพของ Helpdesk ในการผลักดันเคสที่ติดขัดให้สำเร็จ และความรวดเร็วที่แต่ละแผนกยอมปิดเคสหลังจากโดนจี้งาน")
     tracked_all = df_interactive[df_interactive['Track_Status'] == 'ติดตาม'].copy()
     tracked_closed = tracked_all[tracked_all['status'].isin(['ปิด Case', 'เสร็จสิ้น'])].copy()
     if not tracked_closed.empty and not tracked_all.empty:
@@ -290,7 +274,7 @@ try:
     else: st.info("ยังไม่มีข้อมูลเคสที่ปิดแล้วเพื่อนำมาคำนวณเปรียบเทียบในหมวดนี้")
 
     st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
-    section_title("ปริมาณงานทั้งหมด แยกตามแผนก (Total Cases)", "🏢", "แสดงปริมาณเคสที่แต่ละแผนกได้รับมอบหมาย")
+    section_title("ปริมาณงานทั้งหมด แยกตามแผนก (Total Cases)", "🏢", "แสดงปริมาณเคสที่แต่ละแผนกได้รับมอบหมาย เพื่อดูว่างานไปกระจุกตัวอยู่ที่แผนกไหนมากที่สุด")
     dept_df = df_filtered['department'].value_counts().reset_index()
     dept_df.columns = ['Department', 'Count']
     dynamic_h = max(400, len(dept_df) * 40) 
@@ -299,7 +283,7 @@ try:
     fig_dept.update_layout(**pro_layout, height=dynamic_h, xaxis=dict(axis_style_no_grid, range=[0, dept_df['Count'].max() * 1.15], title="จำนวนเคส"), yaxis=dict(axis_style_no_grid, categoryorder='total ascending', title="", tickmode='linear', dtick=1), margin=dict(t=20, b=30, l=180, r=30))
     st.plotly_chart(fig_dept, use_container_width=True)
 
-    section_title("ปริมาณเคสที่มีการติดตาม แยกตามแผนก (Tracked Cases)", "🎯", "แสดงเฉพาะเคสที่เกิดความล่าช้าจนต้องถูกติดตามงาน")
+    section_title("ปริมาณเคสที่มีการติดตาม แยกตามแผนก (Tracked Cases)", "🎯", "แสดงเฉพาะเคสที่เกิดความล่าช้าจน Helpdesk ต้องเข้าไปติดตามงาน เพื่อหาจุดที่เป็นคอขวดของบริษัท")
     tracked_dept_df = tracked_df['department'].value_counts().reset_index()
     tracked_dept_df.columns = ['Department', 'Count']
     if not tracked_dept_df.empty:
@@ -313,7 +297,7 @@ try:
     st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
     col_pie1, col_pie2 = st.columns(2)
     with col_pie1:
-        section_title("สัดส่วนสถานะงาน (Status)", "📌")
+        section_title("สัดส่วนสถานะงาน (Status)", "📌", "สัดส่วนของสถานะเคสทั้งหมดในระบบ")
         status_df = df_interactive['status'].value_counts().reset_index()
         status_df.columns = ['Status', 'Count']
         status_color_map = {'ปิด Case': '#10B981', 'เสร็จสิ้น': '#10B981', 'รับเรื่องร้องขอ': '#F59E0B', 'กำลังดำเนินการ': '#3B82F6', 'ไม่ระบุ': '#94A3B8'}
@@ -323,7 +307,7 @@ try:
         st.plotly_chart(fig_status, use_container_width=True)
 
     with col_pie2:
-        section_title("สัดส่วนสถานะ SLA", "⏱️")
+        section_title("สัดส่วนสถานะ SLA", "⏱️", "ภาพรวมการปิดเคสได้ตามกรอบเวลา (SLA) ที่กำหนดไว้")
         sla_df = df_interactive['sla_status_label'].value_counts().reset_index()
         sla_df.columns = ['SLA_Status', 'Count']
         color_map = {'✅ ภายใน SLA': '#10B981', '🟢 ปกติ': '#34D399', '⚠️ ใกล้หลุด SLA (เร่งมือ)': '#F59E0B', '🔥 เกินกำหนด (รีบปิดด่วน!)': '#EF4444', '❌ เกิน SLA (ปิดแล้ว)': '#B91C1C'}
@@ -332,7 +316,7 @@ try:
         fig_sla.update_layout(**pro_layout, height=450, showlegend=False, margin=dict(t=50, b=50, l=140, r=140))
         st.plotly_chart(fig_sla, use_container_width=True)
 
-    section_title("ตารางวัดผลการติดตามงานรายบุคคล", "👩‍💻")
+    section_title("ตารางวัดผลการติดตามงานรายบุคคล (Agent Performance)", "👩‍💻", "ตรวจสอบความขยันและผลงานของเจ้าหน้าที่ Helpdesk แต่ละท่านในการติดตามเคส")
     if not tracked_df.empty:
         valid_agents_df = tracked_df[tracked_df['First_Agent_Name'] != 'ไม่มี']
         agent_stats = valid_agents_df.groupby('First_Agent_Name').agg(
@@ -343,25 +327,42 @@ try:
         agent_stats = agent_stats.sort_values(by='เคสที่ติดตาม', ascending=False)
         st.dataframe(agent_stats[['First_Agent_Name', 'เคสที่ติดตาม', '% ติดตามรวม', 'ปิดเคส', 'ยังไม่ปิด', '% เคสที่ยังไม่ปิด']], use_container_width=True, hide_index=True, column_config={"First_Agent_Name": st.column_config.TextColumn("รายชื่อเจ้าหน้าที่"), "เคสที่ติดตาม": st.column_config.NumberColumn("จำนวนเคสที่ติดตาม (ครั้ง)"), "% ติดตามรวม": st.column_config.ProgressColumn("% เทียบกับทุกคน", format="%.2f%%", min_value=0, max_value=100), "ปิดเคส": st.column_config.NumberColumn("ปิดเคสสำเร็จ"), "ยังไม่ปิด": st.column_config.NumberColumn("ยังไม่ปิด (ค้าง)"), "% เคสที่ยังไม่ปิด": st.column_config.NumberColumn("% เคสที่ยังไม่ปิด", format="%.2f%%")})
 
-    section_title("🔥 หมวดหมู่ปัญหาที่ถูกติดตามงานมากที่สุด", "📑")
+    section_title("🔥 หมวดหมู่ปัญหาที่ถูกติดตามงานมากที่สุด (Top Tracked Categories)", "📑", "จัดอันดับหมวดหมู่ย่อย (Sub Category) ที่เกิดความล่าช้าจนต้องมีการทวงถามบ่อยที่สุด")
     if not tracked_df.empty:
         cat_sub_df = tracked_df.groupby(['Category', 'Sub_Category']).size().reset_index(name='จำนวนเคสที่ตาม')
         cat_sub_df = cat_sub_df.sort_values('จำนวนเคสที่ตาม', ascending=False)
         st.dataframe(cat_sub_df, use_container_width=True, height=350, hide_index=True, column_config={"จำนวนเคสที่ตาม": st.column_config.ProgressColumn("จำนวนเคสที่ถูกติดตาม (ครั้ง)", format="%d", min_value=0, max_value=int(cat_sub_df['จำนวนเคสที่ตาม'].max()) if not cat_sub_df.empty else 100)})
     else: st.info("ไม่มีข้อมูลการติดตามงานสำหรับหมวดหมู่นี้")
 
-    section_title("🚨 เคสค้างที่รอการติดตามซ้ำ", "📞")
-    active_tracked_cases = tracked_df[~tracked_df['status'].isin(['ปิด Case', 'เสร็จสิ้น'])].copy()
-    if not active_tracked_cases.empty:
-        active_tracked_cases['ชั่วโมงที่เงียบหาย'] = (pd.Timestamp.now() - active_tracked_cases['Last_Track_Time']).dt.total_seconds() / 3600
-        active_tracked_cases['ชั่วโมงที่เงียบหาย'] = active_tracked_cases['ชั่วโมงที่เงียบหาย'].round(1)
-        active_tracked_cases = active_tracked_cases.sort_values(by='ชั่วโมงที่เงียบหาย', ascending=False)
-        display_followup = active_tracked_cases[['Case_Id', 'First_Agent_Name', 'department', 'status', 'Track_Count', 'Last_Track_Time', 'ชั่วโมงที่เงียบหาย']]
-        display_followup.columns = ['หมายเลข Case', 'คนตามเคสคนแรก', 'แผนก', 'สถานะปัจจุบัน', 'ติดตามมาแล้ว (ครั้ง)', 'อัปเดตล่าสุด', 'เงียบหายไป (ชั่วโมง)']
-        st.dataframe(display_followup, use_container_width=True, height=350, hide_index=True, column_config={"เงียบหายไป (ชั่วโมง)": st.column_config.ProgressColumn("เงียบหายไป (ชั่วโมง)", format="%.1f ชม.", min_value=0, max_value=72), "อัปเดตล่าสุด": st.column_config.DatetimeColumn("อัปเดตล่าสุด", format="DD/MM/YYYY HH:mm")})
-    else: st.info("🎉 ไม่มีเคสค้างที่รอการติดตามซ้ำในขณะนี้")
+    # 💥 แก้ไขตารางหมวดนี้ใหม่ทั้งหมด ดึงเฉพาะเคสที่ยังไม่มีคนตาม และโชว์ SLA ชัดๆ
+    section_title("🚨 เคสค้างที่ยังไม่มีการติดตาม (Pending First Follow-up)", "📞", "รายการเคสค้างที่ **ยังไม่เคยมีเจ้าหน้าที่ Helpdesk เข้าไปติดตามงานเลยแม้แต่ครั้งเดียว** (เรียงจากเคสที่รอนานที่สุด พร้อมเทียบเกณฑ์ SLA)")
+    
+    # กรองเฉพาะเคสที่ยังไม่ปิด และ ยังไม่เคยติดตาม
+    untracked_open_cases = df_interactive[(~df_interactive['status'].isin(['ปิด Case', 'เสร็จสิ้น'])) & (df_interactive['Track_Status'] == 'ไม่ติดตาม')].copy()
+    
+    if not untracked_open_cases.empty:
+        # คำนวณเวลาที่รอ และ SLA (เป็นชั่วโมง) เพื่อแสดงในตารางให้ดูง่าย
+        untracked_open_cases['รอมาแล้ว (ชม.)'] = (untracked_open_cases['actual_minutes_spent'] / 60).round(1)
+        untracked_open_cases['SLA (ชม.)'] = (untracked_open_cases['sla_limit_minutes'] / 60).round(1)
+        
+        # จัดเรียงจากรอนานสุด ขึ้นมาบนสุด
+        untracked_open_cases = untracked_open_cases.sort_values(by='รอมาแล้ว (ชม.)', ascending=False)
+        
+        display_untracked = untracked_open_cases[['Case_Id', 'department', 'status', 'Received_DT', 'รอมาแล้ว (ชม.)', 'SLA (ชม.)', 'sla_status_label']]
+        display_untracked.columns = ['หมายเลข Case', 'แผนก', 'สถานะปัจจุบัน', 'เวลารับเรื่อง', 'รอมาแล้ว (ชม.)', 'SLA ที่กำหนด (ชม.)', 'สถานะ SLA']
 
-    section_title("🍼 The Babysitting Index", "เหนื่อย")
+        st.dataframe(
+            display_untracked, use_container_width=True, height=350, hide_index=True, 
+            column_config={
+                "รอมาแล้ว (ชม.)": st.column_config.ProgressColumn("รอมาแล้ว (ชม.)", format="%.1f ชม.", min_value=0, max_value=max(72, float(untracked_open_cases['รอมาแล้ว (ชม.)'].max()))),
+                "เวลารับเรื่อง": st.column_config.DatetimeColumn("เวลารับเรื่อง", format="DD/MM/YYYY HH:mm"),
+                "SLA ที่กำหนด (ชม.)": st.column_config.NumberColumn("SLA ที่กำหนด (ชม.)", format="%.1f ชม.")
+            }
+        )
+    else: 
+        st.success("🎉 เยี่ยมมาก! ไม่มีเคสค้างที่ตกหล่นการติดตามครั้งแรกเลยในขณะนี้")
+
+    section_title("🍼 The Babysitting Index (ดัชนีความเหนื่อยในการตามงาน)", "เหนื่อย", "วิเคราะห์ว่าแผนกใดต้องใช้ 'จำนวนครั้งในการทวงถามเฉลี่ย' สูงที่สุด ถึงจะยอมปิดงานให้ (กราฟยาว = ดื้อ/ตามยาก)")
     if not tracked_df.empty:
         babysit_df = tracked_df.groupby('department')['Track_Count'].mean().reset_index()
         babysit_df.columns = ['department', 'Avg_Track_Count']
@@ -372,7 +373,7 @@ try:
         st.plotly_chart(fig_babysit, use_container_width=True)
     else: st.info("ไม่มีข้อมูลการติดตามงานสำหรับประเมินดัชนีในขณะนี้")
 
-    section_title("🚨 ระบบเตือนภัยล่วงหน้า: เคสวิกฤตที่ต้องรีบตามด่วน!", "⚠️")
+    section_title("🚨 ระบบเตือนภัยล่วงหน้า: เคสวิกฤตที่ต้องรีบตามด่วน! (Proactive Alert)", "⚠️", "คัดเฉพาะเคสที่กินเวลาไปแล้วเกิน 75% ของ SLA (ใกล้หลุดเกณฑ์) และยังไม่มีเจ้าหน้าที่ Helpdesk คนไหนเข้าไปดูเลย!")
     open_cases_df = df_interactive[~df_interactive['status'].isin(['ปิด Case', 'เสร็จสิ้น'])].copy()
     if not open_cases_df.empty:
         urgent_df = open_cases_df[(open_cases_df['sla_limit_minutes'] > 0) & (open_cases_df['actual_minutes_spent'] >= (open_cases_df['sla_limit_minutes'] * 0.75))].copy()
@@ -387,7 +388,7 @@ try:
     else: st.success("🎉 ไม่มีเคสค้างในระบบเลย!")
         
     st.markdown("<hr style='margin-top: 40px; margin-bottom: 20px;'>", unsafe_allow_html=True)
-    section_title("💣 กำแพงแห่งความรับผิดชอบ (SLA Breach Matrix)", "📊")
+    section_title("💣 กำแพงแห่งความรับผิดชอบ (SLA Breach Matrix)", "📊", "เจาะลึก 'อัตราการหลุด SLA' แยกตามแผนกและหมวดหมู่ เพื่อชี้เป้าว่าแผนกไหนคือคอขวดที่แท้จริง")
     sla_matrix_df = df_interactive.copy()
     sla_matrix_df['Is_Breached'] = sla_matrix_df['sla_status_label'].isin(['❌ เกิน SLA (ปิดแล้ว)', '🔥 เกินกำหนด (รีบปิดด่วน!)']).astype(int)
     breach_summary = sla_matrix_df.groupby(['department', 'Category']).agg(Total_Cases=('Case_Id', 'count'), Breached_Cases=('Is_Breached', 'sum')).reset_index()
@@ -397,7 +398,7 @@ try:
         st.dataframe(breach_summary, use_container_width=True, height=400, hide_index=True, column_config={"department": st.column_config.TextColumn("แผนกที่รับผิดชอบ"), "Category": st.column_config.TextColumn("หมวดหมู่งาน"), "Total_Cases": st.column_config.NumberColumn("จำนวนเคสทั้งหมด"), "Breached_Cases": st.column_config.NumberColumn("หลุด SLA (เคส)"), "% หลุด SLA": st.column_config.ProgressColumn("อัตราการหลุด SLA (%)", format="%.1f%%", min_value=0, max_value=100)})
     else: st.info("ไม่มีข้อมูลเพียงพอ หรือไม่มีเคสที่หลุด SLA ในช่วงเวลานี้")
 
-    section_title("⏳ ระยะเวลาเฉลี่ยในการจบงาน", "⏱️")
+    section_title("⏳ ระยะเวลาเฉลี่ยในการจบงาน (Average Resolution Time vs SLA)", "⏱️", "เปรียบเทียบ 'เวลาเฉลี่ยที่ใช้จริง' กับ 'SLA ที่ตั้งไว้' เพื่อประเมินว่าควรปรับปรุง SLA ให้สมเหตุสมผลหรือไม่")
     closed_cases_df = df_interactive[df_interactive['status'].isin(['ปิด Case', 'เสร็จสิ้น'])].copy()
     if not closed_cases_df.empty:
         aht_summary = closed_cases_df.groupby(['department', 'Category', 'Sub_Category']).agg(Total_Closed=('Case_Id', 'count'), Avg_Actual_Mins=('actual_minutes_spent', 'mean'), Avg_SLA_Mins=('sla_limit_minutes', 'mean')).reset_index()
