@@ -159,15 +159,16 @@ def load_and_prep_data(url):
     df['Received_Date'] = pd.NaT
     df['Closed_DT'] = pd.NaT
 
-    # ค้นหาชื่อคอลัมน์แบบไม่สนใจตัวพิมพ์เล็ก/ใหญ่ (Case-insensitive)
+   # ค้นหาชื่อคอลัมน์แบบไม่สนใจตัวพิมพ์เล็ก/ใหญ่
     recv_col = next((c for c in df.columns if str(c).lower() == 'datetime_received'), None)
     if recv_col:
-        df['Received_DT'] = pd.to_datetime(df[recv_col], format='%d/%m/%y %H:%M:%S', errors='coerce')
+        # 💥 พระเอกคือ dayfirst=True บังคับให้ระบบรู้ว่าตัวเลขชุดแรกคือ "วัน" ไม่ใช่ "เดือน"
+        df['Received_DT'] = pd.to_datetime(df[recv_col], dayfirst=True, errors='coerce')
         df['Received_Date'] = df['Received_DT'].dt.date
         
     closed_col = next((c for c in df.columns if str(c).lower() == 'datetime_closed'), None)
     if closed_col:
-        df['Closed_DT'] = pd.to_datetime(df[closed_col], format='%d/%m/%y %H:%M:%S', errors='coerce')
+        df['Closed_DT'] = pd.to_datetime(df[closed_col], dayfirst=True, errors='coerce')
 
     df['department'] = df.get('department', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
     df['status'] = df.get('status', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
