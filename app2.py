@@ -120,7 +120,7 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
 # ==========================================
 # 5. โหลดข้อมูล
 # ==========================================
-SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSgPRb97RGvfCerYBUEctV2nSQNA2FhddBpdnpMuq55ol1tcY8x1WaGU1UK_rMOAKU1cfEJEAD_U6ag/pub?gid=1993689259&single=true&output=csv"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRVUhShKYRay7zI0R4LcD9YBoe9VaZHIYvSRMWNXBAMDFws78ImtPqVPAfqKSvD_4lua8dgJm1OTaG/pub?output=csv"
 
 @st.cache_data(ttl=300)
 def load_and_prep_data(url):
@@ -151,8 +151,8 @@ def load_and_prep_data(url):
         df['sla_status_label'] = df.apply(get_sla_status_label, axis=1)
     else: df['sla_status_label'] = 'ไม่พบข้อมูล SLA'
 
-    actual_msg_col = next((col for col in df.columns if COL_MSG in col), None)
-    actual_time_col = next((col for col in df.columns if COL_TIME in col), None)
+    actual_msg_col = next((col for col in df.columns if COL_MSG.lower() in str(col).lower()), None)
+    actual_time_col = next((col for col in df.columns if COL_TIME.lower() in str(col).lower()), None)
 
     if actual_msg_col and actual_time_col:
         tracking_df = df.apply(lambda row: extract_tracking_info(row, actual_msg_col, actual_time_col), axis=1)
@@ -184,13 +184,19 @@ try:
     st.sidebar.markdown("<h2 style='margin-top: 15px;'>🎯 ตัวกรองข้อมูล</h2>", unsafe_allow_html=True)
     st.sidebar.markdown("<hr style='margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
-    if df['Received_Date'].dropna().empty: min_date = max_date = pd.Timestamp.now().date()
-    else: min_date, max_date = df['Received_Date'].min(), df['Received_Date'].max()
+    valid_dates = df['Received_DT'].dropna()
+    if valid_dates.empty: 
+        min_date = max_date = pd.Timestamp.now().date()
+    else: 
+        min_date = valid_dates.min().date()
+        max_date = valid_dates.max().date()
 
     date_range = st.sidebar.date_input("📅 ช่วงเวลา", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-    start_date = date_range[0] if len(date_range) > 0 else min_date
-    end_date = date_range[1] if len(date_range) > 1 else start_date
-    df_filtered = df[(df['Received_Date'] >= start_date) & (df['Received_Date'] <= end_date)]
+    start_date = pd.to_datetime(date_range[0]) if len(date_range) > 0 else pd.to_datetime(min_date)
+    end_date = pd.to_datetime(date_range[1]) if len(date_range) > 1 else start_date
+    end_date = end_date.replace(hour=23, minute=59, second=59)
+
+    df_filtered = df[(df['Received_DT'].notna()) & (df['Received_DT'] >= start_date) & (df['Received_DT'] <= end_date)]
 
     all_depts = sorted([str(x) for x in df_filtered['department'].unique()])
     all_status = sorted([str(x) for x in df_filtered['status'].unique()])
@@ -206,7 +212,6 @@ try:
 
     df_interactive = df_filtered.copy() 
 
-    # สไตล์กราฟพื้นฐาน
     pro_layout = dict(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="Prompt", color="#0F172A", size=14))
     axis_style = dict(tickfont=dict(size=13, weight='bold', color='#1E293B'), title_font=dict(size=14, weight='bold', color='#0F172A'), showgrid=True, gridcolor="#E2E8F0", automargin=True)
     axis_style_no_grid = dict(axis_style, showgrid=False)
@@ -242,7 +247,7 @@ try:
     st.markdown("<br>", unsafe_allow_html=True)
 
     section_title("ปริมาณเคสรายวัน (Daily Volume Trend)", "📈", "แสดงแนวโน้มปริมาณเคสที่รับเข้ามาในแต่ละวัน เพื่อประเมินภาระงานของทีม Helpdesk")
-    trend_df = df_interactive.groupby('Received_Date').size().reset_index(name='Cases')
+    trend_df = df_interactive.dropna(subset=['Received_Date']).groupby('Received_Date').size().reset_index(name='Cases')
     if not trend_df.empty:
         fig_trend = go.Figure()
         fig_trend.add_trace(go.Scatter(x=trend_df['Received_Date'], y=trend_df['Cases'], mode='lines+markers+text', text=trend_df['Cases'], textposition='top center', textfont=dict(color='#0F172A', size=14, weight="bold"), line=dict(color='#2563EB', width=3, shape='spline'), marker=dict(size=8, color='#FFFFFF', line=dict(width=2, color='#2563EB')), fill='tozeroy', fillcolor='rgba(59, 130, 246, 0.1)'))
@@ -353,6 +358,50 @@ try:
     else: 
         st.success("🎉 เยี่ยมมาก! ไม่มีเคสค้างที่ตกหล่นการติดตามครั้งแรกเลยในขณะนี้")
 
+    # ==========================================
+    # ✅ NEW: ตารางเคสที่ติดตามแล้วแต่ยังไม่ปิด
+    # ==========================================
+    section_title("📋 เคสที่ติดตามแล้วแต่ยังไม่ปิด (Tracked but Still Open)", "🔄", "รายการเคสที่เจ้าหน้าที่ Helpdesk เข้าไปติดตามงานแล้ว แต่ยังไม่ได้รับการปิด — เรียงจากเคสที่รอนานที่สุด")
+    tracked_open_df = df_interactive[
+        (df_interactive['Track_Status'] == 'ติดตาม') &
+        (~df_interactive['status'].isin(['ปิด Case', 'เสร็จสิ้น']))
+    ].copy()
+
+    if not tracked_open_df.empty:
+        tracked_open_df['รอมาแล้ว (ชม.)'] = (tracked_open_df['actual_minutes_spent'] / 60).round(1)
+        tracked_open_df = tracked_open_df.sort_values('รอมาแล้ว (ชม.)', ascending=False)
+
+        # ดึงค่า response_time_v จากคอลัมน์จริงในข้อมูล
+        actual_time_col_disp = found_time if found_time else None
+
+        cols_to_select = ['Case_Id', 'First_Agent_Name', 'Category', 'Sub_Category', 'Track_Count', 'รอมาแล้ว (ชม.)']
+        col_rename = ['หมายเลข Case', 'ชื่อเจ้าหน้าที่ที่ตาม', 'Category', 'Sub Category', 'ตามไปแล้ว (ครั้ง)', 'รอมาแล้ว (ชม.)']
+
+        if actual_time_col_disp and actual_time_col_disp in tracked_open_df.columns:
+            cols_to_select.insert(4, actual_time_col_disp)
+            col_rename.insert(4, 'Response Time')
+
+        display_tracked_open = tracked_open_df[cols_to_select].copy()
+        display_tracked_open.columns = col_rename
+
+        col_config = {
+            "หมายเลข Case": st.column_config.TextColumn("หมายเลข Case"),
+            "ชื่อเจ้าหน้าที่ที่ตาม": st.column_config.TextColumn("ชื่อเจ้าหน้าที่ที่ตาม"),
+            "Category": st.column_config.TextColumn("หมวดหมู่หลัก"),
+            "Sub Category": st.column_config.TextColumn("หมวดหมู่ย่อย"),
+            "ตามไปแล้ว (ครั้ง)": st.column_config.NumberColumn("ตามไปแล้ว (ครั้ง)", format="%d ครั้ง"),
+            "รอมาแล้ว (ชม.)": st.column_config.NumberColumn("รอมาแล้ว (ชม.)", format="%.1f ชม."),
+        }
+        if "Response Time" in col_rename:
+            col_config["Response Time"] = st.column_config.TextColumn("Response Time")
+
+        st.dataframe(
+            display_tracked_open, use_container_width=True, height=400, hide_index=True,
+            column_config=col_config
+        )
+    else:
+        st.success("🎉 ไม่มีเคสที่ติดตามแล้วค้างอยู่ในระบบ!")
+
     section_title("🍼 The Babysitting Index (ดัชนีความเหนื่อยในการตามงาน)", "เหนื่อย", "วิเคราะห์ว่าแผนกใดต้องใช้ 'จำนวนครั้งในการทวงถามเฉลี่ย' สูงที่สุด ถึงจะยอมปิดงานให้ (กราฟยาว = ดื้อ/ตามยาก)")
     if not tracked_df.empty:
         babysit_df = tracked_df.groupby('department')['Track_Count'].mean().reset_index()
@@ -364,30 +413,6 @@ try:
         st.plotly_chart(fig_babysit, use_container_width=True)
     else: st.info("ไม่มีข้อมูลการติดตามงานสำหรับประเมินดัชนีในขณะนี้")
 
-    section_title("🚨 ระบบเตือนภัยล่วงหน้า: เคสวิกฤตที่ต้องรีบตามด่วน! (Proactive Alert)", "⚠️", "คัดเฉพาะเคสที่กินเวลาไปแล้วเกิน 75% ของ SLA (ใกล้หลุดเกณฑ์) และยังไม่มีเจ้าหน้าที่ Helpdesk คนไหนเข้าไปดูเลย!")
-    open_cases_df = df_interactive[~df_interactive['status'].isin(['ปิด Case', 'เสร็จสิ้น'])].copy()
-    if not open_cases_df.empty:
-        urgent_df = open_cases_df[(open_cases_df['sla_limit_minutes'] > 0) & (open_cases_df['actual_minutes_spent'] >= (open_cases_df['sla_limit_minutes'] * 0.75))].copy()
-        urgent_untracked_df = urgent_df[urgent_df['Track_Status'] == 'ไม่ติดตาม'].copy()
-        if not urgent_untracked_df.empty:
-            urgent_untracked_df['SLA_Hours'] = (urgent_untracked_df['sla_limit_minutes'] / 60).round(1)
-            urgent_untracked_df['Spent_Hours'] = (urgent_untracked_df['actual_minutes_spent'] / 60).round(1)
-            urgent_untracked_df = urgent_untracked_df.sort_values('Spent_Hours', ascending=False)
-            
-            display_urgent = urgent_untracked_df[['Case_Id', 'department', 'Category', 'Received_DT', 'SLA_Hours', 'Spent_Hours']]
-            display_urgent.columns = ['หมายเลข Case', 'แผนก', 'หมวดหมู่', 'เวลารับเรื่อง', 'SLA ที่กำหนด (ชม.)', 'เวลาที่ใช้ไป (ชม.)']
-            
-            st.dataframe(
-                display_urgent, use_container_width=True, height=350, hide_index=True, 
-                column_config={
-                    "เวลารับเรื่อง": st.column_config.DatetimeColumn("เวลารับเรื่อง", format="DD/MM/YYYY HH:mm"), 
-                    "SLA ที่กำหนด (ชม.)": st.column_config.NumberColumn("SLA (ชม.)", format="%.1f ชม."),
-                    "เวลาที่ใช้ไป (ชม.)": st.column_config.NumberColumn("ใช้เวลาไปแล้ว (ชม.)", format="%.1f ชม.")
-                }
-            )
-        else: st.success("🎉 ยอดเยี่ยม! ไม่มีเคสวิกฤตที่ตกหล่นการติดตามเลยในขณะนี้")
-    else: st.success("🎉 ไม่มีเคสค้างในระบบเลย!")
-        
     st.markdown("<hr style='margin-top: 40px; margin-bottom: 20px;'>", unsafe_allow_html=True)
     section_title("💣 กำแพงแห่งความรับผิดชอบ (SLA Breach Matrix)", "📊", "เจาะลึก 'อัตราการหลุด SLA' แยกตามแผนกและหมวดหมู่ เพื่อชี้เป้าว่าแผนกไหนคือคอขวดที่แท้จริง")
     sla_matrix_df = df_interactive.copy()
