@@ -120,7 +120,7 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
 # ==========================================
 # 5. โหลดข้อมูล
 # ==========================================
-SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSgPRb97RGvfCerYBUEctV2nSQNA2FhddBpdnpMuq55ol1tcY8x1WaGU1UK_rMOAKU1cfEJEAD_U6ag/pub?output=csv"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSgPRb97RGvfCerYBUEctV2nSQNA2FhddBpdnpMuq55ol1tcY8x1WaGU1UK_rMOAKU1cfEJEAD_U6ag/pub?gid=1993689259&single=true&output=csv"
 
 @st.cache_data(ttl=300)
 def load_and_prep_data(url):
