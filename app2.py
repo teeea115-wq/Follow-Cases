@@ -132,67 +132,14 @@ def load_and_prep_data_bq():
     credentials = service_account.Credentials.from_service_account_info(key_dict)
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
 
-    # 📝 MASTER SQL: เพิ่มเงื่อนไข WHERE ดึงเฉพาะเคสที่ Helpdesk มีการทวงถาม!
+   # 📝 MASTER SQL: ดูดจาก Table เล็กที่เราทำไว้ (ข้อมูลน้อย โหลดเสี้ยววินาที ไม่กิน RAM)
     master_sql = """
-    WITH raw_data AS (
-        SELECT 
-            Case_Id,
-            datetime_received,
-            datetime_closed,
-            COALESCE(department, 'ไม่ระบุ') AS department,
-            COALESCE(status, 'ไม่ระบุ') AS status,
-            COALESCE(Category, 'ไม่ระบุ') AS Category,
-            COALESCE(Sub_Category, 'ไม่ระบุ') AS Sub_Category,
-            SLA,
-            response_message,
-            response_time_v,
-            duration_total_mins 
-        FROM `helpdeskdb-486609.helpdesk_system.master_table`
-        WHERE datetime_received IS NOT NULL
-          AND response_message IS NOT NULL
-          -- ฟิลเตอร์ด้วยคำสั่ง REGEXP_CONTAINS ระดับ Database โหลดไวขึ้น 100 เท่า!
-          AND REGEXP_CONTAINS(response_message, r'(?i)เบื้องต้นทางเจ้าหน้าที่ทำการติดตาม|help\s*desk\s*[0-9]+.*ติดตาม')
-    )
-    SELECT
-        *,
-        (CAST(IFNULL(REGEXP_EXTRACT(SLA, r'(\d+)\s*วัน'), '0') AS INT64) * 1440) +
-        (CAST(IFNULL(REGEXP_EXTRACT(SLA, r'(\d+)\s*ชั่วโมง'), '0') AS INT64) * 60) +
-        CAST(IFNULL(REGEXP_EXTRACT(SLA, r'(\d+)\s*นาที'), '0') AS INT64) AS sla_limit_minutes
-    FROM raw_data
+        SELECT *
+        FROM `helpdeskdb-486609.helpdesk_system.tracked_cases_summary`
     """
-
+    
+    # ยิงคำสั่ง SQL และรับกลับมาเป็น DataFrame
     df = client.query(master_sql).to_dataframe()
-    
-    if df.empty:
-        return df, COL_MSG, COL_TIME
-
-    # แปลงวันที่
-    df['Received_DT'] = pd.to_datetime(df['datetime_received'], errors='coerce')
-    df['Closed_DT'] = pd.to_datetime(df['datetime_closed'], errors='coerce')
-    df['Received_Date'] = df['Received_DT'].dt.date
-
-    now = pd.Timestamp.now()
-    
-    df['actual_minutes_spent'] = df.apply(lambda row: calculate_actual_mins(row, now), axis=1)
-
-    if 'sla_limit_minutes' in df.columns:
-        df['sla_status_label'] = df.apply(get_sla_status_label, axis=1)
-    else: 
-        df['sla_status_label'] = 'ไม่พบข้อมูล SLA'
-
-    if COL_MSG in df.columns and COL_TIME in df.columns:
-        tracking_df = df.apply(lambda row: extract_tracking_info(row, COL_MSG, COL_TIME), axis=1)
-        df = pd.concat([df, tracking_df], axis=1)
-    else:
-        df['Track_Status'] = 'ไม่ติดตาม'
-        df['Track_Count'] = 0
-        df['First_Agent'] = 'ไม่มี'
-        df['Last_Track_Time'] = pd.NaT
-
-    agent_mapping = {'Help Desk 2': 'Help Desk 2 (เจนจิรา)', 'Help Desk 3': 'Help Desk 3 (มนัส)', 'Help Desk 4': 'Help Desk 4 (ฉัตรลดา)', 'Help Desk 5': 'Help Desk 5 (จิรวัฒน์)', 'Help Desk 6': 'Help Desk 6 (กิติลักษณ์)'}
-    df['First_Agent_Name'] = df.get('First_Agent', pd.Series(['ไม่มี']*len(df))).map(agent_mapping).fillna(df.get('First_Agent', 'ไม่มี'))
-
-    return df, COL_MSG, COL_TIME
 
 # ==========================================
 # 🚀 เริ่มการทำงานของ Dashboard
