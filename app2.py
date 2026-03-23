@@ -104,7 +104,6 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
     for i in range(min(len(msgs), len(times))):
         msg = msgs[i].strip()
         t_val = times[i].strip()
-        # ใช้ Logic เดิมในการแกะชื่อคนตามและเวลา
         if "เบื้องต้นทางเจ้าหน้าที่ทำการติดตาม" in msg or re.search(r"(?i)help\s*desk\s*[0-9]+.*ติดตาม", msg):
             agent_match = re.search(r"(?i)help\s*desk\s*([0-9]+)", msg)
             if agent_match:
@@ -132,14 +131,66 @@ def load_and_prep_data_bq():
     credentials = service_account.Credentials.from_service_account_info(key_dict)
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
 
-   # 📝 MASTER SQL: ดูดจาก Table เล็กที่เราทำไว้ (ข้อมูลน้อย โหลดเสี้ยววินาที ไม่กิน RAM)
-    master_sql = """
-        SELECT *
-        FROM `helpdeskdb-486609.helpdesk_system.tracked_cases_summary`
+    # 💡 ใส่ r หน้า """ เพื่อแก้ปัญหา SyntaxWarning
+    master_sql = r"""
+    WITH raw_data AS (
+        SELECT 
+            Case_Id,
+            datetime_received,
+            datetime_closed,
+            COALESCE(department, 'ไม่ระบุ') AS department,
+            COALESCE(status, 'ไม่ระบุ') AS status,
+            COALESCE(Category, 'ไม่ระบุ') AS Category,
+            COALESCE(Sub_Category, 'ไม่ระบุ') AS Sub_Category,
+            SLA,
+            response_message,
+            response_time_v,
+            duration_total_mins 
+        FROM `helpdeskdb-486609.helpdesk_system.master_table`
+        WHERE datetime_received IS NOT NULL
+          AND response_message IS NOT NULL
+          AND REGEXP_CONTAINS(response_message, r'(?i)เบื้องต้นทางเจ้าหน้าที่ทำการติดตาม|help\s*desk\s*[0-9]+.*ติดตาม')
+    )
+    SELECT
+        *,
+        (CAST(IFNULL(REGEXP_EXTRACT(SLA, r'(\d+)\s*วัน'), '0') AS INT64) * 1440) +
+        (CAST(IFNULL(REGEXP_EXTRACT(SLA, r'(\d+)\s*ชั่วโมง'), '0') AS INT64) * 60) +
+        CAST(IFNULL(REGEXP_EXTRACT(SLA, r'(\d+)\s*นาที'), '0') AS INT64) AS sla_limit_minutes
+    FROM raw_data
     """
-    
-    # ยิงคำสั่ง SQL และรับกลับมาเป็น DataFrame
+
     df = client.query(master_sql).to_dataframe()
+    
+    if df.empty:
+        return df, COL_MSG, COL_TIME
+
+    df['Received_DT'] = pd.to_datetime(df['datetime_received'], errors='coerce')
+    df['Closed_DT'] = pd.to_datetime(df['datetime_closed'], errors='coerce')
+    df['Received_Date'] = df['Received_DT'].dt.date
+
+    now = pd.Timestamp.now()
+    
+    df['actual_minutes_spent'] = df.apply(lambda row: calculate_actual_mins(row, now), axis=1)
+
+    if 'sla_limit_minutes' in df.columns:
+        df['sla_status_label'] = df.apply(get_sla_status_label, axis=1)
+    else: 
+        df['sla_status_label'] = 'ไม่พบข้อมูล SLA'
+
+    if COL_MSG in df.columns and COL_TIME in df.columns:
+        tracking_df = df.apply(lambda row: extract_tracking_info(row, COL_MSG, COL_TIME), axis=1)
+        df = pd.concat([df, tracking_df], axis=1)
+    else:
+        df['Track_Status'] = 'ไม่ติดตาม'
+        df['Track_Count'] = 0
+        df['First_Agent'] = 'ไม่มี'
+        df['Last_Track_Time'] = pd.NaT
+
+    agent_mapping = {'Help Desk 2': 'Help Desk 2 (เจนจิรา)', 'Help Desk 3': 'Help Desk 3 (มนัส)', 'Help Desk 4': 'Help Desk 4 (ฉัตรลดา)', 'Help Desk 5': 'Help Desk 5 (จิรวัฒน์)', 'Help Desk 6': 'Help Desk 6 (กิติลักษณ์)'}
+    df['First_Agent_Name'] = df.get('First_Agent', pd.Series(['ไม่มี']*len(df))).map(agent_mapping).fillna(df.get('First_Agent', 'ไม่มี'))
+
+    # บรรทัดนี้สำคัญมาก ห้ามลบเด็ดขาด!
+    return df, COL_MSG, COL_TIME
 
 # ==========================================
 # 🚀 เริ่มการทำงานของ Dashboard
@@ -195,7 +246,7 @@ try:
     axis_style_no_grid = dict(axis_style, showgrid=False)
 
     # ==========================================
-    # 7. Dashboard Layout (ปรับ KPI ให้ตรงกับข้อมูลที่กรองมา)
+    # 7. Dashboard Layout
     # ==========================================
     st.markdown("<h1>🔥 Helpdesk Tracker Analytics</h1>", unsafe_allow_html=True)
     st.markdown("<p style='color: #64748B; margin-top: -15px; margin-bottom: 25px;'>ระบบวิเคราะห์เจาะลึกเฉพาะ <b>'เคสที่มีการถูกติดตาม (Follow-up)'</b> เท่านั้น</p>", unsafe_allow_html=True)
@@ -342,4 +393,4 @@ try:
         st.plotly_chart(fig_babysit, use_container_width=True)
 
 except Exception as e:
-    st.error(f"เกิดข้อผิดพลาดในการรันระบบ: {e}")
+    st.error(f"❌ เจอตัวการแล้ว! Error จากระบบคือ: {e}")
