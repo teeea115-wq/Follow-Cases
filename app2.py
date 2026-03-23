@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import re
+from google.oauth2 import service_account
+from google.cloud import bigquery
 
 # ==========================================
 # ⚙️ 1. ตั้งค่าชื่อคอลัมน์จาก BigQuery
@@ -67,15 +69,12 @@ def section_title(text, icon="", desc=""):
     if desc: st.markdown(f"<p style='color: #64748B; font-size: 15px; margin-bottom: 20px; line-height: 1.5;'><i>{desc}</i></p>", unsafe_allow_html=True)
 
 def calculate_actual_mins(row, now):
-    # ถ้าปิดเคสแล้ว ใช้เวลาที่คำนวณมาจาก Apps Script ได้เลย (เร็วกว่าเยอะ)
     if row.get('status') in ['ปิด Case', 'เสร็จสิ้น']:
         if pd.notna(row.get('duration_total_mins')):
             return row['duration_total_mins']
-        # สำรองเผื่อ Apps Script ไม่ได้ส่งมา
         elif pd.notna(row.get('Received_DT')) and pd.notna(row.get('Closed_DT')): 
             return (row['Closed_DT'] - row['Received_DT']).total_seconds() / 60
         return 0
-    # ถ้าเคสยังไม่ปิด คำนวณเวลาที่รอมาจนถึงวินาทีนี้
     else:
         if pd.notna(row.get('Received_DT')): 
             return (now - row['Received_DT']).total_seconds() / 60
@@ -111,7 +110,7 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
                 agent_name = f"Help Desk {agent_match.group(1)}"
                 if first_agent == 'ไม่มี': first_agent = agent_name
             try:
-                t_obj = pd.to_datetime(t_val, format='%Y-%m-%d %H:%M:%S', errors='coerce') # Format จาก BQ
+                t_obj = pd.to_datetime(t_val, format='%Y-%m-%d %H:%M:%S', errors='coerce') 
                 if pd.notna(t_obj): track_times.append(t_obj)
             except: pass
             
@@ -124,11 +123,16 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
     })
 
 # ==========================================
-# 5. โหลดข้อมูลจาก Google BigQuery
+# 5. โหลดข้อมูลจาก Google BigQuery (แก้ Host Error แล้ว)
 # ==========================================
 @st.cache_data(ttl=600, show_spinner=False)
 def load_and_prep_data_bq():
-    conn = st.connection('bigquery', type='sql')
+    # ดึงกุญแจจาก Secrets
+    key_dict = st.secrets["connections"]["bigquery"]
+    
+    # สร้างบัตรผ่านและเชื่อมต่อ BQ โดยตรง
+    credentials = service_account.Credentials.from_service_account_info(key_dict)
+    client = bigquery.Client(credentials=credentials, project=credentials.project_id)
 
     master_sql = """
     WITH raw_data AS (
@@ -155,7 +159,7 @@ def load_and_prep_data_bq():
     FROM raw_data
     """
 
-    df = conn.query(master_sql)
+    df = client.query(master_sql).to_dataframe()
     
     if df.empty:
         return df, COL_MSG, COL_TIME
