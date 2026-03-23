@@ -3,10 +3,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import re
-import numpy as np
 
 # ==========================================
-# ⚙️ 1. ตั้งค่าชื่อคอลัมน์
+# ⚙️ 1. ตั้งค่าชื่อคอลัมน์จาก BigQuery
 # ==========================================
 COL_MSG = 'response_message'  
 COL_TIME = 'response_time_v'  
@@ -67,19 +66,16 @@ def section_title(text, icon="", desc=""):
     st.markdown(f"<h3 style='color: #0F172A; font-weight: 700; margin-top: 35px; margin-bottom: 5px; border-bottom: 2px solid #E2E8F0; padding-bottom: 8px;'>{icon} {text}</h3>", unsafe_allow_html=True)
     if desc: st.markdown(f"<p style='color: #64748B; font-size: 15px; margin-bottom: 20px; line-height: 1.5;'><i>{desc}</i></p>", unsafe_allow_html=True)
 
-def parse_sla_to_mins(sla_text):
-    if pd.isna(sla_text): return 0
-    text = str(sla_text)
-    days = sum(map(int, re.findall(r'(\d+)\s*วัน', text)))
-    hours = sum(map(int, re.findall(r'(\d+)\s*ชั่วโมง', text)))
-    mins = sum(map(int, re.findall(r'(\d+)\s*นาที', text)))
-    return (days * 1440) + (hours * 60) + mins
-
 def calculate_actual_mins(row, now):
+    # ถ้าปิดเคสแล้ว ใช้เวลาที่คำนวณมาจาก Apps Script ได้เลย (เร็วกว่าเยอะ)
     if row.get('status') in ['ปิด Case', 'เสร็จสิ้น']:
-        if pd.notna(row.get('Received_DT')) and pd.notna(row.get('Closed_DT')): 
+        if pd.notna(row.get('duration_total_mins')):
+            return row['duration_total_mins']
+        # สำรองเผื่อ Apps Script ไม่ได้ส่งมา
+        elif pd.notna(row.get('Received_DT')) and pd.notna(row.get('Closed_DT')): 
             return (row['Closed_DT'] - row['Received_DT']).total_seconds() / 60
         return 0
+    # ถ้าเคสยังไม่ปิด คำนวณเวลาที่รอมาจนถึงวินาทีนี้
     else:
         if pd.notna(row.get('Received_DT')): 
             return (now - row['Received_DT']).total_seconds() / 60
@@ -98,11 +94,14 @@ def get_sla_status_label(row):
 def extract_tracking_info(row, col_msg_actual, col_time_actual):
     msg_str = str(row.get(col_msg_actual, ''))
     time_str = str(row.get(col_time_actual, ''))
-    if msg_str == 'nan' or msg_str == '': return pd.Series({'Track_Status': 'ไม่ติดตาม', 'Track_Count': 0, 'First_Agent': 'ไม่มี', 'First_Track_Time': pd.NaT, 'Last_Track_Time': pd.NaT})
+    if msg_str == 'nan' or msg_str == '' or msg_str == 'None': 
+        return pd.Series({'Track_Status': 'ไม่ติดตาม', 'Track_Count': 0, 'First_Agent': 'ไม่มี', 'First_Track_Time': pd.NaT, 'Last_Track_Time': pd.NaT})
+    
     msgs = msg_str.split(',')
     times = time_str.split(',')
     track_times = []
     first_agent = 'ไม่มี'
+    
     for i in range(min(len(msgs), len(times))):
         msg = msgs[i].strip()
         t_val = times[i].strip()
@@ -112,50 +111,71 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
                 agent_name = f"Help Desk {agent_match.group(1)}"
                 if first_agent == 'ไม่มี': first_agent = agent_name
             try:
-                t_obj = pd.to_datetime(t_val, format='%d/%m/%Y %H:%M', errors='coerce')
+                t_obj = pd.to_datetime(t_val, format='%Y-%m-%d %H:%M:%S', errors='coerce') # Format จาก BQ
                 if pd.notna(t_obj): track_times.append(t_obj)
             except: pass
-    return pd.Series({'Track_Status': 'ติดตาม' if track_times else 'ไม่ติดตาม', 'Track_Count': len(track_times), 'First_Agent': first_agent, 'First_Track_Time': min(track_times) if track_times else pd.NaT, 'Last_Track_Time': max(track_times) if track_times else pd.NaT})
+            
+    return pd.Series({
+        'Track_Status': 'ติดตาม' if track_times else 'ไม่ติดตาม', 
+        'Track_Count': len(track_times), 
+        'First_Agent': first_agent, 
+        'First_Track_Time': min(track_times) if track_times else pd.NaT, 
+        'Last_Track_Time': max(track_times) if track_times else pd.NaT
+    })
 
 # ==========================================
-# 5. โหลดข้อมูล
+# 5. โหลดข้อมูลจาก Google BigQuery
 # ==========================================
-SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSgPRb97RGvfCerYBUEctV2nSQNA2FhddBpdnpMuq55ol1tcY8x1WaGU1UK_rMOAKU1cfEJEAD_U6ag/pub?gid=1993689259&single=true&output=csv"
+@st.cache_data(ttl=600, show_spinner=False)
+def load_and_prep_data_bq():
+    conn = st.connection('bigquery', type='sql')
 
-@st.cache_data(ttl=300)
-def load_and_prep_data(url):
-    df = pd.read_csv(url)
-    df.columns = df.columns.str.strip() 
-    df['Received_DT'] = pd.NaT
-    df['Received_Date'] = pd.NaT
-    df['Closed_DT'] = pd.NaT
+    master_sql = """
+    WITH raw_data AS (
+        SELECT 
+            Case_Id,
+            datetime_received,
+            datetime_closed,
+            COALESCE(department, 'ไม่ระบุ') AS department,
+            COALESCE(status, 'ไม่ระบุ') AS status,
+            COALESCE(Category, 'ไม่ระบุ') AS Category,
+            COALESCE(Sub_Category, 'ไม่ระบุ') AS Sub_Category,
+            SLA,
+            response_message,
+            response_time_v,
+            duration_total_mins 
+        FROM `helpdeskdb-486609.helpdesk_system.master_table`
+        WHERE datetime_received IS NOT NULL
+    )
+    SELECT
+        *,
+        (CAST(IFNULL(REGEXP_EXTRACT(SLA, r'(\d+)\s*วัน'), '0') AS INT64) * 1440) +
+        (CAST(IFNULL(REGEXP_EXTRACT(SLA, r'(\d+)\s*ชั่วโมง'), '0') AS INT64) * 60) +
+        CAST(IFNULL(REGEXP_EXTRACT(SLA, r'(\d+)\s*นาที'), '0') AS INT64) AS sla_limit_minutes
+    FROM raw_data
+    """
 
-    recv_col = next((c for c in df.columns if str(c).lower() == 'datetime_received'), None)
-    if recv_col:
-        df['Received_DT'] = pd.to_datetime(df[recv_col], dayfirst=True, errors='coerce')
-        df['Received_Date'] = df['Received_DT'].dt.date
-        
-    closed_col = next((c for c in df.columns if str(c).lower() == 'datetime_closed'), None)
-    if closed_col:
-        df['Closed_DT'] = pd.to_datetime(df[closed_col], dayfirst=True, errors='coerce')
+    df = conn.query(master_sql)
+    
+    if df.empty:
+        return df, COL_MSG, COL_TIME
 
-    df['department'] = df.get('department', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
-    df['status'] = df.get('status', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
-    df['Category'] = df.get('Category', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
-    df['Sub_Category'] = df.get('Sub_Category', pd.Series(['ไม่ระบุ']*len(df))).fillna('ไม่ระบุ')
+    # แปลงวันที่
+    df['Received_DT'] = pd.to_datetime(df['datetime_received'], errors='coerce')
+    df['Closed_DT'] = pd.to_datetime(df['datetime_closed'], errors='coerce')
+    df['Received_Date'] = df['Received_DT'].dt.date
 
     now = pd.Timestamp.now()
-    if 'SLA' in df.columns:
-        df['sla_limit_minutes'] = df['SLA'].apply(parse_sla_to_mins)
-        df['actual_minutes_spent'] = df.apply(lambda row: calculate_actual_mins(row, now), axis=1)
+    
+    df['actual_minutes_spent'] = df.apply(lambda row: calculate_actual_mins(row, now), axis=1)
+
+    if 'sla_limit_minutes' in df.columns:
         df['sla_status_label'] = df.apply(get_sla_status_label, axis=1)
-    else: df['sla_status_label'] = 'ไม่พบข้อมูล SLA'
+    else: 
+        df['sla_status_label'] = 'ไม่พบข้อมูล SLA'
 
-    actual_msg_col = next((col for col in df.columns if COL_MSG.lower() in str(col).lower()), None)
-    actual_time_col = next((col for col in df.columns if COL_TIME.lower() in str(col).lower()), None)
-
-    if actual_msg_col and actual_time_col:
-        tracking_df = df.apply(lambda row: extract_tracking_info(row, actual_msg_col, actual_time_col), axis=1)
+    if COL_MSG in df.columns and COL_TIME in df.columns:
+        tracking_df = df.apply(lambda row: extract_tracking_info(row, COL_MSG, COL_TIME), axis=1)
         df = pd.concat([df, tracking_df], axis=1)
     else:
         df['Track_Status'] = 'ไม่ติดตาม'
@@ -166,13 +186,18 @@ def load_and_prep_data(url):
     agent_mapping = {'Help Desk 2': 'Help Desk 2 (เจนจิรา)', 'Help Desk 3': 'Help Desk 3 (มนัส)', 'Help Desk 4': 'Help Desk 4 (ฉัตรลดา)', 'Help Desk 5': 'Help Desk 5 (จิรวัฒน์)', 'Help Desk 6': 'Help Desk 6 (กิติลักษณ์)'}
     df['First_Agent_Name'] = df.get('First_Agent', pd.Series(['ไม่มี']*len(df))).map(agent_mapping).fillna(df.get('First_Agent', 'ไม่มี'))
 
-    return df, actual_msg_col, actual_time_col
+    return df, COL_MSG, COL_TIME
 
+# ==========================================
+# 🚀 เริ่มการทำงานของ Dashboard
+# ==========================================
 try:
-    df, found_msg, found_time = load_and_prep_data(SHEET_URL)
+    with st.spinner("🚀 กำลังเชื่อมต่อฐานข้อมูล BigQuery..."):
+        df, found_msg, found_time = load_and_prep_data_bq()
 
-    if not found_msg or not found_time:
-        st.warning(f"⚠️ **ระบบหาคอลัมน์ไม่เจอ!** กรุณาเช็คในไฟล์ Sheets ว่ามีคอลัมน์ชื่อ `{COL_MSG}` และ `{COL_TIME}` เป๊ะๆ หรือไม่")
+    if df.empty:
+        st.warning("⚠️ ไม่พบข้อมูลใน BigQuery กรุณาตรวจสอบว่ามีข้อมูลใน Table แล้วหรือยัง")
+        st.stop()
 
     # ==========================================
     # 6. Sidebar Filter
@@ -220,7 +245,7 @@ try:
     # 7. Dashboard Layout 
     # ==========================================
     st.markdown("<h1>📊 Helpdesk Executive Analytics</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #64748B; margin-top: -15px; margin-bottom: 25px;'>ระบบวิเคราะห์ข้อมูลและติดตามผลการดำเนินงานแบบเรียลไทม์</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #64748B; margin-top: -15px; margin-bottom: 25px;'>ระบบวิเคราะห์ข้อมูลและติดตามผลการดำเนินงานแบบเรียลไทม์ผ่าน BigQuery</p>", unsafe_allow_html=True)
 
     total = len(df_interactive)
     closed = len(df_interactive[df_interactive['status'].isin(['ปิด Case', 'เสร็จสิ้น'])])
@@ -358,9 +383,6 @@ try:
     else: 
         st.success("🎉 เยี่ยมมาก! ไม่มีเคสค้างที่ตกหล่นการติดตามครั้งแรกเลยในขณะนี้")
 
-    # ==========================================
-    # ✅ NEW: ตารางเคสที่ติดตามแล้วแต่ยังไม่ปิด
-    # ==========================================
     section_title("📋 เคสที่ติดตามแล้วแต่ยังไม่ปิด (Tracked but Still Open)", "🔄", "รายการเคสที่เจ้าหน้าที่ Helpdesk เข้าไปติดตามงานแล้ว แต่ยังไม่ได้รับการปิด — เรียงจากเคสที่รอนานที่สุด")
     tracked_open_df = df_interactive[
         (df_interactive['Track_Status'] == 'ติดตาม') &
@@ -371,14 +393,11 @@ try:
         tracked_open_df['รอมาแล้ว (ชม.)'] = (tracked_open_df['actual_minutes_spent'] / 60).round(1)
         tracked_open_df = tracked_open_df.sort_values('รอมาแล้ว (ชม.)', ascending=False)
 
-        # ดึงค่า response_time_v จากคอลัมน์จริงในข้อมูล
-        actual_time_col_disp = found_time if found_time else None
-
         cols_to_select = ['Case_Id', 'First_Agent_Name', 'Category', 'Sub_Category', 'Track_Count', 'รอมาแล้ว (ชม.)']
         col_rename = ['หมายเลข Case', 'ชื่อเจ้าหน้าที่ที่ตาม', 'Category', 'Sub Category', 'ตามไปแล้ว (ครั้ง)', 'รอมาแล้ว (ชม.)']
 
-        if actual_time_col_disp and actual_time_col_disp in tracked_open_df.columns:
-            cols_to_select.insert(4, actual_time_col_disp)
+        if COL_TIME in tracked_open_df.columns:
+            cols_to_select.insert(4, COL_TIME)
             col_rename.insert(4, 'Response Time')
 
         display_tracked_open = tracked_open_df[cols_to_select].copy()
