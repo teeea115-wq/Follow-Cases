@@ -15,7 +15,7 @@ COL_TIME = 'response_time_v'
 # ==========================================
 # 2. ตั้งค่าหน้าเว็บและ CSS
 # ==========================================
-st.set_page_config(page_title="Zero SLA Breach Command Center", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SLA KPI Evaluation Center", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -37,7 +37,7 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
-    st.markdown("<br><br><h2 style='text-align: center; color: #1E293B;'>🔒 SLA Tracking Login</h2>", unsafe_allow_html=True)
+    st.markdown("<br><br><h2 style='text-align: center; color: #1E293B;'>🔒 KPI Tracking Login</h2>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         password = st.text_input("🔑 รหัสผ่าน (Password):", type="password")
@@ -124,7 +124,7 @@ def extract_tracking_info(row, col_msg_actual, col_time_actual):
     })
 
 # ==========================================
-# 5. โหลดข้อมูลจาก Google BigQuery (ดูดจาก "ถังเล็ก" เท่านั้น)
+# 5. โหลดข้อมูลจาก Google BigQuery
 # ==========================================
 @st.cache_data(ttl=600, show_spinner=False)
 def load_and_prep_data_bq():
@@ -132,7 +132,6 @@ def load_and_prep_data_bq():
     credentials = service_account.Credentials.from_service_account_info(key_dict)
     client = bigquery.Client(credentials=credentials, project=credentials.project_id)
 
-    # 💡 SQL ชี้ไปที่ ถังเล็ก (tracked_cases_summary) โหลดลื่นไหล ไม่กิน RAM
     master_sql = r"""
         SELECT * FROM `helpdeskdb-486609.helpdesk_system.tracked_cases_summary`
     """
@@ -171,7 +170,7 @@ def load_and_prep_data_bq():
 # 🚀 เริ่มการทำงานของ Dashboard
 # ==========================================
 try:
-    with st.spinner("🚀 กำลังคำนวณหนี้ SLA สะสม..."):
+    with st.spinner("🚀 กำลังประมวลผลข้อมูล KPI..."):
         df, found_msg, found_time = load_and_prep_data_bq()
 
     if df.empty:
@@ -179,147 +178,211 @@ try:
         st.stop()
 
     # ==========================================
-    # 6. Sidebar Filter
+    # 6. Sidebar Filter (ปรับให้วัด KPI ตามเวลาปิดเป๊ะๆ)
     # ==========================================
     if st.sidebar.button("🚪 ล็อกเอาท์ (Logout)", use_container_width=True):
         st.session_state["authenticated"] = False
         st.rerun()
 
-    st.sidebar.markdown("<h2 style='margin-top: 15px;'>🎯 ช่วงเวลาอ้างอิง</h2>", unsafe_allow_html=True)
-    st.sidebar.markdown("<p style='font-size: 12px; color: #64748B;'>* เคสที่ปิดแล้ว: นับผลงานตามเดือนที่เลือก<br>* หนี้ SLA: ดึงหนี้สะสมมาทั้งหมด</p>", unsafe_allow_html=True)
+    st.sidebar.markdown("<h2 style='margin-top: 15px;'>📅 รอบประเมิน KPI</h2>", unsafe_allow_html=True)
+    st.sidebar.markdown("<p style='font-size: 12px; color: #64748B;'>* เคสที่ปิด: นับผลงานเฉพาะที่ <b>'ปิดภายในช่วงเวลาที่เลือก'</b> เท่านั้น<br>* เคสหนี้: ถ้าปิดหลังจากนี้ ถือว่าเป็นหนี้ค้างของเดือนนี้</p>", unsafe_allow_html=True)
 
     valid_dates = df['Received_DT'].dropna()
     min_date = valid_dates.min().date() if not valid_dates.empty else pd.Timestamp.now().date()
     max_date = pd.Timestamp.now().date()
 
-    date_range = st.sidebar.date_input("📅 เลือกช่วงเวลา", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+    date_range = st.sidebar.date_input("🗓️ เลือกเดือน/ช่วงเวลาที่ต้องการดู KPI", value=(min_date, max_date), min_value=min_date, max_value=max_date)
     start_date = pd.to_datetime(date_range[0]) if len(date_range) > 0 else pd.to_datetime(min_date)
     end_date = pd.to_datetime(date_range[1]) if len(date_range) > 1 else start_date
     end_date = end_date.replace(hour=23, minute=59, second=59)
 
-    # 💡 LOGIC การกรองใหม่ตามที่คุณขอ!
-    # 1. เคสที่ยังไม่ปิด (ดึงทั้งหมด ที่เกิดก่อนหรือเท่ากับ end_date)
-    open_mask = (~df['status'].isin(['ปิด Case', 'เสร็จสิ้น'])) & (df['Received_DT'] <= end_date)
-    # 2. เคสที่ปิดแล้ว (ดึงเฉพาะที่ปิดในช่วงเวลาที่เลือก)
+    # 💡 LOGIC ตัดยอด KPI สุดเนี๊ยบ:
+    # 1. เคสหนี้สะสม ณ สิ้นเดือน (รับเรื่องก่อนเส้นตาย AND (ยังไม่ปิด OR ดันไปปิดเอาเดือนอื่นในอนาคต))
+    open_mask = (df['Received_DT'] <= end_date) & (
+        (~df['status'].isin(['ปิด Case', 'เสร็จสิ้น'])) | 
+        (df['Closed_DT'] > end_date)
+    )
+    # 2. ผลงานปิดเคส (ปิดเสร็จสมบูรณ์ภายในช่วงเวลาที่เลือกเป๊ะๆ)
     closed_mask = (df['status'].isin(['ปิด Case', 'เสร็จสิ้น'])) & (df['Closed_DT'] >= start_date) & (df['Closed_DT'] <= end_date)
     
     df_filtered = df[open_mask | closed_mask].copy()
 
-    # ตัวกรองเพิ่มเติม
     st.sidebar.markdown("<hr style='margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
     all_depts = sorted([str(x) for x in df_filtered['department'].unique()])
     selected_depts = st.sidebar.multiselect("🏢 แผนก (Department):", all_depts)
     if selected_depts: df_filtered = df_filtered[df_filtered['department'].isin(selected_depts)]
 
-    # แบ่งกลุ่มข้อมูลตามแกน "SLA & การติดตาม"
-    # กลุ่มที่ 1: หนี้ SLA (ยังไม่ปิด และเกิน/ใกล้เกิน SLA)
-    sla_debt_df = df_filtered[(~df_filtered['status'].isin(['ปิด Case', 'เสร็จสิ้น'])) & (df_filtered['sla_status_label'].isin(['🔥 เกินกำหนด SLA (รีบปิดด่วน!)', '⚠️ ใกล้หลุด SLA (เร่งมือ)']))]
+    # ==========================================
+    # 📊 แบ่งกลุ่มข้อมูลตามโจทย์ KPI (แยกกู้ชีพ กับ ตามปกติ)
+    # ==========================================
+    # 1. หนี้ SLA (ยังเปิดอยู่ หรือ ปิดอนาคต)
+    sla_debt_df = df_filtered[open_mask & (df_filtered['sla_status_label'].isin(['🔥 เกินกำหนด SLA (รีบปิดด่วน!)', '⚠️ ใกล้หลุด SLA (เร่งมือ)', '❌ เกิน SLA (ปิดแล้ว)']))]
     
-    # กลุ่มที่ 2: ผลงานเคลียร์หนี้ SLA ในเดือนนี้ (ปิดแล้ว และเคยเกิน SLA และถูกติดตาม)
-    sla_cleared_df = df_filtered[(df_filtered['status'].isin(['ปิด Case', 'เสร็จสิ้น'])) & (df_filtered['sla_status_label'] == '❌ เกิน SLA (ปิดแล้ว)') & (df_filtered['Track_Status'] == 'ติดตาม')]
+    # 2. ดึงเฉพาะเคสที่ปิดแล้วในรอบนี้ + มีการติดตาม
+    period_closed_df = df_filtered[closed_mask]
+    tracked_closed_df = period_closed_df[period_closed_df['Track_Status'] == 'ติดตาม']
 
-    # กลุ่มที่ 3: ผลงานติดตามเคสรวมในเดือนนี้
-    tracked_closed_df = df_filtered[(df_filtered['status'].isin(['ปิด Case', 'เสร็จสิ้น'])) & (df_filtered['Track_Status'] == 'ติดตาม')]
+    # 3. แยกประเภทการปิด (กู้ชีพ VS ปิดปกติ)
+    # 3.1 ตามแล้วเกิน SLA (กู้ชีพ)
+    tracked_over_sla_df = tracked_closed_df[tracked_closed_df['sla_status_label'].str.contains('เกิน SLA', na=False)]
+    # 3.2 ตามแล้วปิดทัน SLA (ปิดปกติ)
+    tracked_in_sla_df = tracked_closed_df[~tracked_closed_df['sla_status_label'].str.contains('เกิน SLA', na=False)]
 
     # ==========================================
     # 7. Dashboard Layout
     # ==========================================
-    st.markdown("<h1>🎯 Zero SLA Breach Command Center</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #64748B; margin-top: -15px; margin-bottom: 25px;'>เป้าหมาย: หนี้ SLA สะสมต้องเป็น 0 และแสดงหลักฐานการติดตามงานทุกเคส</p>", unsafe_allow_html=True)
+    st.markdown("<h1>🎯 SLA KPI Evaluation Center</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color: #64748B; margin-top: -15px; margin-bottom: 25px;'>ประเมินผลงานการติดตามและปิดเคสของรอบวันที่ <b>{start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}</b></p>", unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
-    with c1: create_kpi_card("SLA Debt (เคสค้าง)", f"{len(sla_debt_df):,}", "#EF4444", "เคสที่ทะลุ SLA หรือกำลังจะทะลุ (ยังไม่ปิด)")
-    with c2: create_kpi_card("SLA Cleared", f"{len(sla_cleared_df):,}", "#10B981", "เคสหลุด SLA ที่ตามบี้จนปิดสำเร็จในรอบนี้")
-    with c3: create_kpi_card("Total Tracked & Closed", f"{len(tracked_closed_df):,}", "#3B82F6", "จำนวนเคสทั้งหมดที่ตามจนปิดสำเร็จ")
+    with c1: 
+        create_kpi_card("หนี้ SLA (ค้าง/เกิน)", f"{len(sla_debt_df):,}", "#EF4444", "เคสค้างที่เกิน SLA หรือใกล้เกิน (ณ สิ้นรอบประเมิน)")
+    with c2: 
+        create_kpi_card("ผลงานกู้ชีพ (เกิน SLA)", f"{len(tracked_over_sla_df):,}", "#8B5CF6", "ตามบี้เคสที่เกิน SLA จนปิดสำเร็จ")
+    with c3: 
+        create_kpi_card("ผลงานปิดปกติ (ใน SLA)", f"{len(tracked_in_sla_df):,}", "#10B981", "ตามเคสปกติและปิดได้ทันเวลา")
     with c4: 
         untracked_debt = len(sla_debt_df[sla_debt_df['Track_Status'] == 'ไม่ติดตาม'])
-        create_kpi_card("Critical Untracked", f"{untracked_debt:,}", "#F59E0B", "เคสทะลุ SLA ที่ Helpdesk ยังไม่เคยตามเลย!")
+        create_kpi_card("วิกฤต! ยังไม่ได้ตาม", f"{untracked_debt:,}", "#F59E0B", "เคสหนี้ SLA ที่ Helpdesk ปล่อยปละละเลย")
 
     # ==========================================
-    # 🚨 เสาที่ 1: หนี้ SLA ที่ต้องตามล้าง (เป้าหมายต้องเป็น 0)
+    # 🏆 เสาที่ 1: ผลงานล้างเคสในเดือนนี้ (แยกประเภทชัดเจน)
     # ==========================================
     st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
-    section_title("🚨 หนี้ SLA สะสมที่ต้องตามล้างด่วน (Pending SLA Breaches)", "🔥", "รายการเคสที่ทะลุ SLA หรือใกล้ทะลุ แต่ยังไม่มีการ 'ปิดเคส' (พร้อมหลักฐานการติดตามงานล่าสุด)")
+    section_title("🏆 สรุปผลงานการติดตามและ 'ปิดเคสสำเร็จ' ประจำรอบ KPI", "✅", "รวมผลงานเคสที่ Helpdesk ตามบี้จนแผนกยอมปิดเคสให้ภายในรอบบิลที่เลือก (แยกผลงานกู้ชีพ กับ ผลงานปกติ)")
 
-    if not sla_debt_df.empty:
-        sla_debt_df['รอมาแล้ว (ชม.)'] = (sla_debt_df['actual_minutes_spent'] / 60).round(1)
-        sla_debt_df['SLA (ชม.)'] = (sla_debt_df['sla_limit_minutes'] / 60).round(1)
-        sla_debt_df = sla_debt_df.sort_values(by=['sla_status_label', 'รอมาแล้ว (ชม.)'], ascending=[True, False])
+    if not tracked_closed_df.empty:
+        tracked_closed_df = tracked_closed_df.copy()
+        tracked_closed_df['ประเภทผลงาน'] = tracked_closed_df['sla_status_label'].apply(lambda x: '🚀 กู้ชีพ (ปิดเคสที่เกิน SLA)' if 'เกิน SLA' in str(x) else '✅ ปิดปกติ (ทันเวลา SLA)')
+        tracked_closed_df['ใช้เวลาจริง (ชม.)'] = (tracked_closed_df['actual_minutes_spent'] / 60).round(1)
+        tracked_closed_df = tracked_closed_df.sort_values(by=['ประเภทผลงาน', 'Closed_DT'], ascending=[True, False])
 
-        # จัดฟอร์แมตวันที่ให้โชว์สวยๆ (หลักฐาน)
-        sla_debt_df['วันที่เปิด'] = sla_debt_df['Received_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
-        sla_debt_df['เวลาติดตามล่าสุด'] = sla_debt_df['Last_Track_Time'].dt.strftime('%d/%m/%Y %H:%M').fillna('❌ ยังไม่มีคนตาม!')
+        tracked_closed_df['วันที่เปิด'] = tracked_closed_df['Received_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
+        tracked_closed_df['วันที่เริ่มตาม'] = tracked_closed_df['First_Track_Time'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
+        tracked_closed_df['วันที่ปิด'] = tracked_closed_df['Closed_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
 
-        display_debt = sla_debt_df[['Case_Id', 'วันที่เปิด', 'department', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)', 'เวลาติดตามล่าสุด', 'First_Agent_Name', 'sla_status_label']]
-        display_debt.columns = ['หมายเลข Case', 'เวลาที่เปิดเคส', 'แผนก', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)', 'เวลาที่ติดตามล่าสุด', 'ผู้ติดตามคนแรก', 'สถานะวิกฤต']
+        display_cleared = tracked_closed_df[['Case_Id', 'ประเภทผลงาน', 'วันที่เปิด', 'วันที่เริ่มตาม', 'วันที่ปิด', 'department', 'ใช้เวลาจริง (ชม.)', 'First_Agent_Name']]
+        display_cleared.columns = ['หมายเลข Case', 'ประเภทผลงาน', 'เวลาเปิดเคส', 'เวลาที่เริ่มตาม', 'เวลาที่ปิดเคส (KPI)', 'แผนก', 'ใช้เวลาจนจบ (ชม.)', 'ฮีโร่ที่ตามงาน']
 
-        st.dataframe(
-            display_debt, use_container_width=True, height=350, hide_index=True,
-            column_config={
-                "สถานะวิกฤต": st.column_config.TextColumn("สถานะวิกฤต"),
-                "เวลาที่ติดตามล่าสุด": st.column_config.TextColumn("เวลาที่ติดตามล่าสุด"),
-            }
-        )
+        st.dataframe(display_cleared, use_container_width=True, height=400, hide_index=True)
     else:
-        st.success("🎉 สุดยอดมาก! ตอนนี้ไม่มีเคสไหนที่ค้างเกิน SLA เลย (หนี้ SLA เป็น 0)")
+        st.info("ยังไม่มีผลงานการติดตามจนปิดเคสสำเร็จ ในช่วงเวลา KPI ที่เลือก")
 
     # ==========================================
-    # 🏆 เสาที่ 2: ผลงานเคลียร์หนี้ในเดือนนี้
-    # ==========================================
-    st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
-    section_title("🏆 ผลงานกู้ชีพเคสเกิน SLA สำเร็จ (SLA Breaches Cleared)", "✅", "เคสที่เคยเกิน SLA แต่ Helpdesk ตามบี้จนแผนกยอม 'ปิดเคส' ได้สำเร็จในกรอบเวลาที่เลือก (พร้อมหลักฐาน)")
-
-    if not sla_cleared_df.empty:
-        sla_cleared_df['ใช้เวลาจริง (ชม.)'] = (sla_cleared_df['actual_minutes_spent'] / 60).round(1)
-        sla_cleared_df['SLA (ชม.)'] = (sla_cleared_df['sla_limit_minutes'] / 60).round(1)
-        sla_cleared_df = sla_cleared_df.sort_values(by='Closed_DT', ascending=False)
-
-        # หลักฐาน 3 เวลา
-        sla_cleared_df['วันที่เปิด'] = sla_cleared_df['Received_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
-        sla_cleared_df['วันที่เริ่มตาม'] = sla_cleared_df['First_Track_Time'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
-        sla_cleared_df['วันที่ปิด'] = sla_cleared_df['Closed_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
-
-        display_cleared = sla_cleared_df[['Case_Id', 'วันที่เปิด', 'วันที่เริ่มตาม', 'วันที่ปิด', 'department', 'SLA (ชม.)', 'ใช้เวลาจริง (ชม.)', 'First_Agent_Name']]
-        display_cleared.columns = ['หมายเลข Case', 'เวลาเปิดเคส', 'เวลาที่เริ่มติดตาม', 'เวลาที่ปิดเคส', 'แผนก', 'SLA (ชม.)', 'ใช้เวลาจนจบ (ชม.)', 'ฮีโร่ที่ตามงาน']
-
-        st.dataframe(display_cleared, use_container_width=True, height=300, hide_index=True)
-    else:
-        st.info("ยังไม่มีผลงานการปิดเคสที่หลุด SLA ในช่วงเวลานี้")
-
-    # ==========================================
-    # 👨‍💻 เสาที่ 3: ตะแกรงร่อนความขยัน (Agent Performance)
+    # 👨‍💻 เสาที่ 2: ตะแกรงร่อนความขยัน (ปรับให้เห็น KPI กู้ชีพ vs ปกติ)
     # ==========================================
     st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
-    section_title("🕵️‍♂️ ตะแกรงร่อนความขยัน: สรุปผลงาน Helpdesk รายบุคคล", "📊", "ประเมินศักยภาพการตามงาน ว่าใครรับผิดชอบตามบี้จนสำเร็จ และใครปล่อยเคสที่ตามไว้ให้ค้างเติ่ง")
+    section_title("🕵️‍♂️ ตะแกรงร่อนความขยัน: วัดผล KPI Helpdesk รายบุคคล", "📊", "ประเมินศักยภาพการตามงานในรอบเดือนนี้ ว่าใครมีผลงานประเภทไหนโดดเด่น")
 
     tracked_all_df = df_filtered[df_filtered['Track_Status'] == 'ติดตาม']
     if not tracked_all_df.empty:
-        valid_agents_df = tracked_all_df[tracked_all_df['First_Agent_Name'] != 'ไม่มี']
+        valid_agents_df = tracked_all_df[tracked_all_df['First_Agent_Name'] != 'ไม่มี'].copy()
         
-        agent_stats = valid_agents_df.groupby('First_Agent_Name').agg(
-            เคสที่ตามทั้งหมด=('Case_Id', 'count'),
-            กู้ชีพเกินSLAสำเร็จ=('Case_Id', lambda x: valid_agents_df.loc[x.index, 'sla_status_label'].isin(['❌ เกิน SLA (ปิดแล้ว)']).sum() if 'sla_status_label' in valid_agents_df.columns else 0),
-            ปิดเคสรวมสำเร็จ=('status', lambda x: x.isin(['ปิด Case', 'เสร็จสิ้น']).sum()), 
-            ตามแล้วยังค้างอยู่=('status', lambda x: (~x.isin(['ปิด Case', 'เสร็จสิ้น'])).sum())
-        ).reset_index()
+        if not valid_agents_df.empty:
+            # ใช้ closed_mask เพื่อกรองผลงานปิดเฉพาะเดือนนี้ให้พนักงาน
+            agent_closed_period = valid_agents_df[valid_agents_df.index.isin(period_closed_df.index)]
+            
+            # คำนวณ KPI
+            agent_stats = valid_agents_df.groupby('First_Agent_Name').agg(
+                เคสที่ตามทั้งหมด=('Case_Id', 'count'),
+                ตามแล้วยังค้างอยู่=('status', lambda x: (~x.isin(['ปิด Case', 'เสร็จสิ้น'])).sum())
+            ).reset_index()
 
-        agent_stats['% ปิดสำเร็จ'] = (agent_stats['ปิดเคสรวมสำเร็จ'] / agent_stats['เคสที่ตามทั้งหมด']) * 100
-        agent_stats = agent_stats.sort_values(by=['ปิดเคสรวมสำเร็จ', 'เคสที่ตามทั้งหมด'], ascending=[False, False])
+            # คำนวณยอดปิดเฉพาะในรอบ KPI
+            closed_stats = agent_closed_period.groupby('First_Agent_Name').agg(
+                ปิดเคสรวมในรอบ=('Case_Id', 'count')
+            ).reset_index()
+
+            # คำนวณแยกประเภทกู้ชีพและปกติ ในรอบ KPI
+            over_sla_agent = agent_closed_period[agent_closed_period['sla_status_label'].str.contains('เกิน SLA', na=False)].groupby('First_Agent_Name').size().reset_index(name='ผลงานกู้ชีพ (เกิน SLA)')
+            in_sla_agent = agent_closed_period[~agent_closed_period['sla_status_label'].str.contains('เกิน SLA', na=False)].groupby('First_Agent_Name').size().reset_index(name='ผลงานปิดปกติ (ใน SLA)')
+            
+            # ประกอบร่าง
+            agent_stats = pd.merge(agent_stats, closed_stats, on='First_Agent_Name', how='left').fillna(0)
+            agent_stats = pd.merge(agent_stats, over_sla_agent, on='First_Agent_Name', how='left').fillna(0)
+            agent_stats = pd.merge(agent_stats, in_sla_agent, on='First_Agent_Name', how='left').fillna(0)
+            
+            agent_stats['% ปิดสำเร็จในรอบ'] = (agent_stats['ปิดเคสรวมในรอบ'] / agent_stats['เคสที่ตามทั้งหมด']) * 100
+            agent_stats = agent_stats.sort_values(by=['ผลงานกู้ชีพ (เกิน SLA)', 'ปิดเคสรวมในรอบ'], ascending=[False, False])
+
+            st.dataframe(
+                agent_stats[['First_Agent_Name', 'เคสที่ตามทั้งหมด', 'ผลงานกู้ชีพ (เกิน SLA)', 'ผลงานปิดปกติ (ใน SLA)', 'ปิดเคสรวมในรอบ', 'ตามแล้วยังค้างอยู่', '% ปิดสำเร็จในรอบ']], 
+                use_container_width=True, hide_index=True, 
+                column_config={
+                    "First_Agent_Name": st.column_config.TextColumn("รายชื่อเจ้าหน้าที่ Helpdesk"),
+                    "เคสที่ตามทั้งหมด": st.column_config.NumberColumn("เข้าไปตามทั้งหมด (เคส)"),
+                    "ผลงานกู้ชีพ (เกิน SLA)": st.column_config.NumberColumn("กู้ชีพเกิน SLA สำเร็จ 🚀"),
+                    "ผลงานปิดปกติ (ใน SLA)": st.column_config.NumberColumn("ปิดทัน SLA ✅"),
+                    "ปิดเคสรวมในรอบ": st.column_config.NumberColumn("รวมปิดได้ในรอบ KPI"),
+                    "ตามแล้วยังค้างอยู่": st.column_config.NumberColumn("ตามแล้วแต่ยังค้าง"),
+                    "% ปิดสำเร็จในรอบ": st.column_config.ProgressColumn("Win Rate (%)", format="%.1f%%", min_value=0, max_value=100)
+                }
+            )
+        else:
+            st.info("ยังไม่มีรายชื่อเจ้าหน้าที่เข้าทำการติดตามในระบบ")
+    else:
+        st.info("ไม่มีข้อมูลการติดตามงานในช่วงเวลานี้")
+
+    # ==========================================
+    # 🚨 เสาที่ 3: ศูนย์เตือนภัยวิกฤต SLA
+    # ==========================================
+    st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
+    section_title("🚨 ศูนย์เตือนภัยวิกฤต: หนี้ SLA ที่ยังไม่ได้ตามงาน!", "⏰", "รายการเคสทะลุ SLA ที่ Helpdesk ปล่อยปละละเลย (ยังไม่มีประวัติติดตาม)")
+
+    if not sla_debt_df.empty:
+        untracked_sla_df = sla_debt_df[sla_debt_df['Track_Status'] == 'ไม่ติดตาม'].copy()
+        
+        if not untracked_sla_df.empty:
+            untracked_sla_df['รอมาแล้ว (ชม.)'] = (untracked_sla_df['actual_minutes_spent'] / 60).round(1)
+            untracked_sla_df['SLA (ชม.)'] = (untracked_sla_df['sla_limit_minutes'] / 60).round(1)
+            untracked_sla_df = untracked_sla_df.sort_values(by=['sla_status_label', 'รอมาแล้ว (ชม.)'], ascending=[True, False])
+
+            untracked_sla_df['วันที่เปิด'] = untracked_sla_df['Received_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
+
+            display_debt = untracked_sla_df[['Case_Id', 'วันที่เปิด', 'department', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)', 'sla_status_label']]
+            display_debt.columns = ['หมายเลข Case', 'เวลาที่เปิดเคส', 'แผนก', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)', 'สถานะวิกฤต']
+
+            st.dataframe(
+                display_debt, use_container_width=True, height=350, hide_index=True,
+                column_config={"สถานะวิกฤต": st.column_config.TextColumn("สถานะวิกฤต")}
+            )
+        else:
+            st.success("🎉 เยี่ยมมาก! ไม่มีเคสที่ปล่อยหลุด SLA โดยไม่ตามงานเลย (จี้ครบทุกเคสแล้ว)")
+    else:
+        st.success("🎉 สุดยอดมาก! ตอนนี้ไม่มีเคสไหนที่ค้างเกิน SLA เลย")
+
+    # ==========================================
+    # 📋 เสาที่ 4: เคสที่ตามแล้วแต่ยังไม่ปิด
+    # ==========================================
+    st.markdown("<hr style='margin-top: 30px; margin-bottom: 10px;'>", unsafe_allow_html=True)
+    section_title("🔄 รายการเคสที่ตามแล้วแต่ยังค้างอยู่ (Tracked but Pending)", "📞", "Helpdesk เข้าไปตามงานแล้ว แต่แผนกยังไม่ยอมปิดเคสให้ (ต้องไปจี้ซ้ำแบบรายคน!)")
+
+    # ดึงเฉพาะเคสที่ยังไม่ปิดตาม open_mask
+    tracked_open_df = df_filtered[open_mask & (df_filtered['Track_Status'] == 'ติดตาม')].copy()
+
+    if not tracked_open_df.empty:
+        tracked_open_df['SLA (ชม.)'] = (tracked_open_df['sla_limit_minutes'] / 60).round(1)
+        tracked_open_df['รอมาแล้ว (ชม.)'] = (tracked_open_df['actual_minutes_spent'] / 60).round(1)
+        
+        tracked_open_df['วันที่เปิด'] = tracked_open_df['Received_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
+        tracked_open_df['วันที่ตาม'] = tracked_open_df['First_Track_Time'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
+
+        tracked_open_df = tracked_open_df.sort_values(by='รอมาแล้ว (ชม.)', ascending=False)
+
+        display_tracked_open = tracked_open_df[['Case_Id', 'First_Agent_Name', 'วันที่เปิด', 'วันที่ตาม', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)', 'department']]
+        display_tracked_open.columns = ['หมายเลข Case', 'ผู้ติดตาม', 'วันที่เปิดเคส', 'วันที่ตามล่าสุด', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)', 'แผนกที่รับผิดชอบ']
 
         st.dataframe(
-            agent_stats[['First_Agent_Name', 'เคสที่ตามทั้งหมด', 'ปิดเคสรวมสำเร็จ', 'กู้ชีพเกินSLAสำเร็จ', 'ตามแล้วยังค้างอยู่', '% ปิดสำเร็จ']], 
-            use_container_width=True, hide_index=True, 
+            display_tracked_open, use_container_width=True, height=400, hide_index=True,
             column_config={
-                "First_Agent_Name": st.column_config.TextColumn("รายชื่อเจ้าหน้าที่ Helpdesk"),
-                "เคสที่ตามทั้งหมด": st.column_config.NumberColumn("เข้าไปตามทั้งหมด (เคส)"),
-                "กู้ชีพเกินSLAสำเร็จ": st.column_config.NumberColumn("กู้ชีพเคสเกิน SLA สำเร็จ 🏆"),
-                "ปิดเคสรวมสำเร็จ": st.column_config.NumberColumn("บี้จนปิดสำเร็จรวม (เคส)"),
-                "ตามแล้วยังค้างอยู่": st.column_config.NumberColumn("ตามแล้วแต่ยังค้าง (เคส)"),
-                "% ปิดสำเร็จ": st.column_config.ProgressColumn("อัตราการบี้งานสำเร็จ (%)", format="%.1f%%", min_value=0, max_value=100)
+                "หมายเลข Case": st.column_config.TextColumn("หมายเลข Case"),
+                "ผู้ติดตาม": st.column_config.TextColumn("ผู้ติดตาม (ต้องไปจี้)"),
+                "วันที่เปิดเคส": st.column_config.TextColumn("วันที่เปิดเคส"),
+                "วันที่ตามล่าสุด": st.column_config.TextColumn("วันที่ตามล่าสุด"),
             }
         )
     else:
-        st.info("ไม่มีข้อมูลการติดตามงานรายบุคคลในช่วงเวลานี้")
+        st.success("🎉 ไม่มีเคสที่ตามแล้วค้างอยู่ในระบบ! เคสที่ถูกตามปิดหมดแล้วเกลี้ยงตู้!")
 
 except Exception as e:
     st.error(f"❌ เจอตัวการแล้ว! Error จากระบบคือ: {e}")
