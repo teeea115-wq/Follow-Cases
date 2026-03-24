@@ -91,33 +91,43 @@ def get_sla_status_label(row):
         elif (actual / limit) >= 0.8: return '⚠️ ใกล้หลุด SLA (เร่งมือ)'
         else: return '🟢 ปกติ'
 
+# 💡 อัปเกรดลอจิกการนับจำนวนครั้งที่ตามงานใหม่ทั้งหมด!
 def extract_tracking_info(row, col_msg_actual, col_time_actual):
     msg_str = str(row.get(col_msg_actual, ''))
     time_str = str(row.get(col_time_actual, ''))
-    if msg_str == 'nan' or msg_str == '' or msg_str == 'None': 
+    
+    if msg_str in ('nan', '', 'None'): 
         return pd.Series({'Track_Status': 'ไม่ติดตาม', 'Track_Count': 0, 'First_Agent': 'ไม่มี', 'First_Track_Time': pd.NaT, 'Last_Track_Time': pd.NaT})
     
-    msgs = msg_str.split(',')
-    times = time_str.split(',')
-    track_times = []
-    first_agent = 'ไม่มี'
+    # 🔍 สแกนหาคำว่าติดตาม "ทุกจุด" ในข้อความ (ไม่สนว่าจะเว้นบรรทัดแบบไหน)
+    tracking_pattern = r"(?i)(เบื้องต้นทางเจ้าหน้าที่ทำการติดตาม|help\s*desk\s*[0-9]+.*ติดตาม)"
+    track_matches = re.findall(tracking_pattern, msg_str)
+    track_count = len(track_matches)
     
-    for i in range(min(len(msgs), len(times))):
-        msg = msgs[i].strip()
-        t_val = times[i].strip()
-        if "เบื้องต้นทางเจ้าหน้าที่ทำการติดตาม" in msg or re.search(r"(?i)help\s*desk\s*[0-9]+.*ติดตาม", msg):
-            agent_match = re.search(r"(?i)help\s*desk\s*([0-9]+)", msg)
-            if agent_match:
-                agent_name = f"Help Desk {agent_match.group(1)}"
-                if first_agent == 'ไม่มี': first_agent = agent_name
+    first_agent = 'ไม่มี'
+    agent_match = re.search(r"(?i)help\s*desk\s*([0-9]+)", msg_str)
+    if agent_match:
+        first_agent = f"Help Desk {agent_match.group(1)}"
+        
+    # ดึงเวลาออกมา (ถ้า format อ่านได้)
+    track_times = []
+    found_times = re.findall(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", time_str)
+    if found_times:
+        for t in found_times:
+            try: track_times.append(pd.to_datetime(t))
+            except: pass
+            
+    if not track_times:
+        for t_val in re.split(r'[,|\n]', time_str):
+            t_val = t_val.strip()
             try:
-                t_obj = pd.to_datetime(t_val, format='%Y-%m-%d %H:%M:%S', errors='coerce') 
+                t_obj = pd.to_datetime(t_val, errors='coerce') 
                 if pd.notna(t_obj): track_times.append(t_obj)
             except: pass
             
     return pd.Series({
-        'Track_Status': 'ติดตาม' if track_times else 'ไม่ติดตาม', 
-        'Track_Count': len(track_times), 
+        'Track_Status': 'ติดตาม' if track_count > 0 else 'ไม่ติดตาม', 
+        'Track_Count': track_count, 
         'First_Agent': first_agent, 
         'First_Track_Time': min(track_times) if track_times else pd.NaT, 
         'Last_Track_Time': max(track_times) if track_times else pd.NaT
@@ -178,7 +188,7 @@ try:
         st.stop()
 
     # ==========================================
-    # 6. Sidebar Filter (ปรับฟิลเตอร์วันที่เป็นอิสระสุดๆ)
+    # 6. Sidebar Filter 
     # ==========================================
     if st.sidebar.button("🚪 ล็อกเอาท์ (Logout)", use_container_width=True):
         st.session_state["authenticated"] = False
@@ -190,7 +200,6 @@ try:
     today_date = pd.Timestamp.now().date()
     first_day_of_month = today_date.replace(day=1)
 
-    # แยกช่อง Start กับ End ออกจากกัน เพื่อให้ผู้ใช้กดเลือกได้แบบอิสระ 100%
     start_date_input = st.sidebar.date_input("เริ่มวันที่ (Start Date)", value=first_day_of_month)
     end_date_input = st.sidebar.date_input("ถึงวันที่ (End Date)", value=today_date)
     
@@ -211,7 +220,7 @@ try:
     if selected_depts: df_filtered = df_filtered[df_filtered['department'].isin(selected_depts)]
 
     # ==========================================
-    # 📊 แบ่งกลุ่มข้อมูลตามโจทย์ KPI
+    # 📊 แบ่งกลุ่มข้อมูล
     # ==========================================
     sla_debt_df = df_filtered[open_mask & (df_filtered['sla_status_label'].isin(['🔥 เกินกำหนด SLA (รีบปิดด่วน!)', '⚠️ ใกล้หลุด SLA (เร่งมือ)', '❌ เกิน SLA (ปิดแล้ว)']))]
     
@@ -252,14 +261,14 @@ try:
 
     if not tracked_over_sla_df.empty:
         df_show1 = tracked_over_sla_df.copy()
+        df_show1['SLA (ชม.)'] = (df_show1['sla_limit_minutes'] / 60).round(1)
         df_show1['ใช้เวลาจริง (ชม.)'] = (df_show1['actual_minutes_spent'] / 60).round(1)
         df_show1['วันที่เปิด'] = df_show1['Received_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
         df_show1['วันที่ปิด'] = df_show1['Closed_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
         df_show1 = df_show1.sort_values(by='Closed_DT', ascending=False)
 
-        # เพิ่มคอลัมน์ แผนก Category SubCat TrackCount ครบถ้วน!
-        df_show1 = df_show1[['Case_Id', 'วันที่เปิด', 'วันที่ปิด', 'department', 'Category', 'Sub_Category', 'Track_Count', 'First_Agent_Name', 'ใช้เวลาจริง (ชม.)']]
-        df_show1.columns = ['เลข Case', 'เวลาเปิดเคส', 'เวลาปิดสำเร็จ', 'แผนก', 'หมวดหมู่หลัก', 'หมวดหมู่ย่อย', 'ตามไป (ครั้ง)', 'ฮีโร่กู้ชีพ', 'ใช้เวลา (ชม.)']
+        df_show1 = df_show1[['Case_Id', 'วันที่เปิด', 'วันที่ปิด', 'department', 'Category', 'Sub_Category', 'Track_Count', 'SLA (ชม.)', 'First_Agent_Name', 'ใช้เวลาจริง (ชม.)']]
+        df_show1.columns = ['เลข Case', 'เวลาเปิดเคส', 'เวลาปิดสำเร็จ', 'แผนก', 'หมวดหมู่หลัก', 'หมวดหมู่ย่อย', 'ตามไป (ครั้ง)', 'SLA (ชม.)', 'ฮีโร่กู้ชีพ', 'ใช้เวลา (ชม.)']
 
         st.dataframe(df_show1, use_container_width=True, height=350, hide_index=True)
     else:
@@ -273,14 +282,14 @@ try:
 
     if not tracked_in_sla_df.empty:
         df_show2 = tracked_in_sla_df.copy()
+        df_show2['SLA (ชม.)'] = (df_show2['sla_limit_minutes'] / 60).round(1)
         df_show2['ใช้เวลาจริง (ชม.)'] = (df_show2['actual_minutes_spent'] / 60).round(1)
         df_show2['วันที่เปิด'] = df_show2['Received_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
         df_show2['วันที่ปิด'] = df_show2['Closed_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
         df_show2 = df_show2.sort_values(by='Closed_DT', ascending=False)
 
-        # เพิ่มคอลัมน์ แผนก Category SubCat TrackCount ครบถ้วน!
-        df_show2 = df_show2[['Case_Id', 'วันที่เปิด', 'วันที่ปิด', 'department', 'Category', 'Sub_Category', 'Track_Count', 'First_Agent_Name', 'ใช้เวลาจริง (ชม.)']]
-        df_show2.columns = ['เลข Case', 'เวลาเปิดเคส', 'เวลาปิดสำเร็จ', 'แผนก', 'หมวดหมู่หลัก', 'หมวดหมู่ย่อย', 'ตามไป (ครั้ง)', 'คนตามงาน', 'ใช้เวลา (ชม.)']
+        df_show2 = df_show2[['Case_Id', 'วันที่เปิด', 'วันที่ปิด', 'department', 'Category', 'Sub_Category', 'Track_Count', 'SLA (ชม.)', 'First_Agent_Name', 'ใช้เวลาจริง (ชม.)']]
+        df_show2.columns = ['เลข Case', 'เวลาเปิดเคส', 'เวลาปิดสำเร็จ', 'แผนก', 'หมวดหมู่หลัก', 'หมวดหมู่ย่อย', 'ตามไป (ครั้ง)', 'SLA (ชม.)', 'คนตามงาน', 'ใช้เวลา (ชม.)']
 
         st.dataframe(df_show2, use_container_width=True, height=350, hide_index=True)
     else:
@@ -352,7 +361,6 @@ try:
 
             untracked_sla_df['วันที่เปิด'] = untracked_sla_df['Received_DT'].dt.strftime('%d/%m/%Y %H:%M').fillna('-')
 
-            # เพิ่มข้อมูลให้ครบถ้วน
             display_debt = untracked_sla_df[['Case_Id', 'วันที่เปิด', 'department', 'Category', 'Sub_Category', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)', 'sla_status_label']]
             display_debt.columns = ['เลข Case', 'เวลาที่เปิดเคส', 'แผนก', 'หมวดหมู่หลัก', 'หมวดหมู่ย่อย', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)', 'สถานะวิกฤต']
 
@@ -382,7 +390,6 @@ try:
 
         tracked_open_df = tracked_open_df.sort_values(by='รอมาแล้ว (ชม.)', ascending=False)
 
-        # ขยายข้อมูลให้มี Category, Sub Category และจำนวนครั้งที่ตาม
         display_tracked_open = tracked_open_df[['Case_Id', 'First_Agent_Name', 'วันที่เปิด', 'วันที่ตาม', 'department', 'Category', 'Sub_Category', 'Track_Count', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)']]
         display_tracked_open.columns = ['เลข Case', 'ผู้ติดตาม', 'เปิดเคส', 'ตามล่าสุด', 'แผนก', 'หมวดหมู่หลัก', 'หมวดหมู่ย่อย', 'ตามไป (ครั้ง)', 'SLA (ชม.)', 'รอมาแล้ว (ชม.)']
 
